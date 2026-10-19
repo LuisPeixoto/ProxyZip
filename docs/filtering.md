@@ -16,6 +16,7 @@ Terms are separated by spaces and combined with **AND**: a request must match ev
 | `host:text` or `domain:text` | The host contains `text` | `host:api` |
 | `path:text` | The path contains `text` | `path:/v2/` |
 | `type:text` | The content type contains `text` | `type:json` |
+| `gql:text` or `graphql:text` | The GraphQL operation (`query GetUser`) contains `text` | `gql:GetUser` |
 | `/regex/` | The URL matches a regular expression (case-insensitive) | `/\/users\/\d+/` |
 | `-term` | Negates any term above | `-analytics`, `-method:get` |
 

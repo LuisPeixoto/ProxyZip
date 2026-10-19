@@ -52,8 +52,9 @@ Tips:
 | Rules (matching, rewriting, planning) | `crates/proxyzip-rules/src` |
 | Breakpoints, throttling, SOCKS5 | `crates/proxyzip-proxy/src/{breakpoint,throttle,socks}.rs` |
 | Data model and events | `crates/proxyzip-core/src` |
-| Body decoding | `crates/proxyzip-codec/src/lib.rs` |
-| HAR and cURL | `crates/proxyzip-export/src` |
+| Body decoding and viewers | `crates/proxyzip-codec/src` |
+| Scripting | `crates/proxyzip-script/src` |
+| HAR, sessions, CSV, Postman, code generation | `crates/proxyzip-export/src` |
 | OS integration | `crates/proxyzip-sysproxy`, `crates/proxyzip-certinstall` |
 | Desktop commands | `apps/desktop/src-tauri/src/commands.rs` |
 | Interface | `apps/desktop/src/lib/components` |
