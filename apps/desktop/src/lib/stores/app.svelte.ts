@@ -1,5 +1,15 @@
 import { listen } from "@tauri-apps/api/event";
-import { api, errorText, type FlowEvent, type FlowId, type FlowSummary, type Status } from "../api";
+import {
+  api,
+  emptyRules,
+  errorText,
+  type ComposeInput,
+  type FlowEvent,
+  type FlowId,
+  type FlowSummary,
+  type RuleSet,
+  type Status,
+} from "../api";
 
 export type Category = "all" | "json" | "html" | "js" | "css" | "img" | "font" | "media" | "ws" | "errors" | "other";
 export type SidebarSel =
@@ -10,6 +20,17 @@ export type SidebarSel =
   | { kind: "host"; value: string }
   | { kind: "client"; value: string };
 export type SortKey = "id" | "status" | "method" | "host" | "path" | "type" | "size" | "duration";
+
+export type ToolsTab =
+  | "block"
+  | "map_local"
+  | "map_remote"
+  | "rewrite"
+  | "breakpoints"
+  | "throttle"
+  | "dns"
+  | "network"
+  | "recording";
 
 export interface Toast {
   id: number;
@@ -133,6 +154,13 @@ class AppStore {
   detailSize = $state(360);
   sidebarOpen = $state(true);
   settingsOpen = $state(false);
+  rules = $state<RuleSet>(emptyRules());
+  toolsOpen = $state(false);
+  toolsTab = $state<ToolsTab>("block");
+  /** The request being composed, or null when the composer is closed. */
+  composer = $state<ComposeInput | null>(null);
+  /** The breakpoint editor is hidden while the user keeps working; it reappears for new pauses. */
+  breakpointHidden = $state(false);
   toasts = $state<Toast[]>([]);
   #toastId = 0;
 
@@ -175,6 +203,8 @@ class AppStore {
     }
     return out;
   });
+
+  paused = $derived(this.flows.filter((f) => f.state === "paused"));
 
   hosts = $derived.by(() => {
     const m = new Map<string, { count: number; errors: number; secure: boolean }>();
@@ -220,6 +250,7 @@ class AppStore {
   async init() {
     await this.reload();
     await this.refreshStatus();
+    await this.reloadRules();
     await listen<FlowEvent[]>("proxyzip://events", (e) => this.apply(e.payload));
     await listen("proxyzip://resync", () => this.reload());
     setInterval(() => this.refreshStatus(), 5000);
@@ -229,6 +260,28 @@ class AppStore {
     const list = await api.getFlows();
     this.#index = new Map(list.map((f, i) => [f.id, i]));
     this.flows = list;
+  }
+
+  async reloadRules() {
+    try {
+      this.rules = await api.getRules();
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  openTools(tab: ToolsTab = this.toolsTab) {
+    this.toolsTab = tab;
+    this.toolsOpen = true;
+  }
+
+  openComposer(request?: ComposeInput) {
+    this.composer = request ?? { method: "GET", url: "https://", headers: [], body_base64: "" };
+  }
+
+  /** Active throttle profile name, for the toolbar. */
+  get throttleLabel(): string | null {
+    return this.rules.throttle.enabled ? this.rules.throttle.profile.name : null;
   }
 
   async refreshStatus() {
@@ -261,6 +314,7 @@ class AppStore {
           const i = this.#index.get(ev.flow.id);
           if (i !== undefined) {
             ensureCopy();
+            if (ev.flow.state === "paused" && list[i].state !== "paused") this.breakpointHidden = false;
             list[i] = ev.flow;
           }
           break;
