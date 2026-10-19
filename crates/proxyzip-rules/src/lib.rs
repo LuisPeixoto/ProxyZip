@@ -10,7 +10,8 @@ mod matcher;
 mod model;
 
 pub use apply::{
-    RequestParts, ResponseParts, apply_request_ops, apply_response_ops, decode_response_body, remove_header, set_header,
+    RequestParts, ResponseParts, apply_request_ops, apply_response_ops, decode_request_body, decode_response_body,
+    remove_header, set_header,
 };
 pub use engine::{Action, LocalFile, Plan, Remap, RequestInfo, content_type_for};
 pub use matcher::{Matcher, wildcard_match};
