@@ -1,0 +1,14 @@
+[package]
+name = "proxyzip-certinstall"
+description = "Install/trust the ProxyZip root CA in OS, browser and developer-tool stores"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+dirs.workspace = true
+serde.workspace = true
+tracing.workspace = true
