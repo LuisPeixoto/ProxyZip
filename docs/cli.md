@@ -26,6 +26,7 @@ proxyzip start --exclude '*.apple.com' --filter '*api*' --verbose
 | `-p, --port <PORT>` | Port (default `9393`). |
 | `--system-proxy` | Point the operating-system proxy at ProxyZip while running. Restored on exit. |
 | `--har <FILE>` | Write everything captured to a HAR file when you press `Ctrl+C`. |
+| `--save <FILE>` | Write everything captured to a [`.pzsession`](sessions.md) file when you press `Ctrl+C`. |
 | `--exclude <HOST>` | Never decrypt this host. Wildcards allowed. Repeatable. |
 | `--include <HOST>` | Decrypt only these hosts and tunnel the rest. Wildcards allowed. Repeatable. |
 | `--filter <GLOB>` | Only print requests whose URL matches the wildcard. |
@@ -47,6 +48,34 @@ proxyzip start --rules rules.json --throttle 3g --socks-port 1081 --reverse 8081
 ```
 
 Press `Ctrl+C` to stop. If the system proxy was enabled by ProxyZip, it is turned off again.
+
+## `proxyzip export`
+
+Converts a HAR file or a [session](sessions.md) into another format.
+
+```bash
+proxyzip export session.pzsession -f csv -o traffic.csv
+proxyzip export session.pzsession -f postman -o collection.json
+proxyzip export capture.har -f session -o capture.pzsession
+```
+
+| Option | Description |
+|--------|-------------|
+| `-f, --format <FORMAT>` | `csv`, `postman`, `har` or `session`. |
+| `-o, --output <FILE>` | Write to a file instead of standard output. Required for `session`. |
+
+## `proxyzip code`
+
+Prints the code that sends a captured request.
+
+```bash
+proxyzip code session.pzsession --lang python --number 3
+```
+
+| Option | Description |
+|--------|-------------|
+| `-l, --lang <LANG>` | `curl`, `httpie`, `powershell`, `python`, `javascript`, `node-axios`, `go`, `rust`, `java`, `kotlin`, `swift`, `csharp`, `php` or `ruby`. Default `curl`. |
+| `-n, --number <N>` | Which request to use; 1 is the first. |
 
 ## `proxyzip ca`
 
