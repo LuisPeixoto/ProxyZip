@@ -5,6 +5,9 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
 use proxyzip_codec::BodyView;
 use proxyzip_core::{FlowId, FlowSummary, Headers, Timing, TlsInfo, WsDirection, WsKind};
+use proxyzip_export::curl::ComposedRequest;
+use proxyzip_proxy::Decision;
+use proxyzip_rules::{RuleSet, ThrottleProfile};
 use proxyzip_tls::CertificateAuthority;
 use serde::Serialize;
 use tauri::State;
@@ -146,6 +149,7 @@ pub struct Status {
     ca_path: String,
     lan_addresses: Vec<String>,
     platform: &'static str,
+    listener_errors: Vec<String>,
 }
 
 #[tauri::command]
@@ -176,6 +180,7 @@ pub async fn get_status(state: State<'_, AppState>) -> CmdResult<Status> {
         ca_path: ca_path.display().to_string(),
         lan_addresses: lan_addresses(),
         platform: std::env::consts::OS,
+        listener_errors: state.listener_errors.read().clone(),
     })
 }
 
@@ -337,28 +342,103 @@ pub fn terminal_env(state: State<'_, AppState>) -> CmdResult<String> {
     Ok(proxyzip_certinstall::terminal_env(&h, p, &state.ca_path()))
 }
 
-/// Re-send a captured request through ProxyZip itself, so the replay is captured too.
-#[tauri::command]
-pub async fn repeat_flow(state: State<'_, AppState>, id: FlowId) -> CmdResult<()> {
-    let flow = state.store.get(id).ok_or("flow not found")?;
+/// Send a request through ProxyZip itself, so it shows up in the list like any other traffic.
+async fn send_through_proxy(
+    state: &AppState,
+    method: &str,
+    url: &str,
+    headers: &[(String, String)],
+    body: Vec<u8>,
+) -> CmdResult<u16> {
     let (h, p) = state.client_host_port().ok_or("proxy is not running")?;
     let ca_pem = state.ca.read().cert_pem().to_string();
     let client = reqwest::Client::builder()
         .proxy(reqwest::Proxy::all(format!("http://{h}:{p}")).map_err(err)?)
         .add_root_certificate(reqwest::Certificate::from_pem(ca_pem.as_bytes()).map_err(err)?)
         .redirect(reqwest::redirect::Policy::none())
+        .no_gzip()
+        .no_brotli()
+        .no_deflate()
         .build()
         .map_err(err)?;
-    let req = &flow.request;
-    let method = reqwest::Method::from_bytes(req.method.as_bytes()).map_err(err)?;
-    let mut builder = client.request(method, req.url().replace("ws://", "http://").replace("wss://", "https://"));
-    for (k, v) in req.headers.iter() {
+    let method = reqwest::Method::from_bytes(method.trim().to_ascii_uppercase().as_bytes()).map_err(err)?;
+    let url = url.replace("ws://", "http://").replace("wss://", "https://");
+    let mut builder = client.request(method, url);
+    for (k, v) in headers {
         let lk = k.to_ascii_lowercase();
         if matches!(lk.as_str(), "host" | "content-length" | "connection" | "proxy-connection" | "transfer-encoding") {
             continue;
         }
         builder = builder.header(k, v);
     }
-    builder.body(req.body.clone()).send().await.map_err(err)?.bytes().await.map_err(err)?;
+    let response = builder.body(body).send().await.map_err(err)?;
+    let status = response.status().as_u16();
+    response.bytes().await.map_err(err)?;
+    Ok(status)
+}
+
+/// Re-send a captured request exactly as it was captured.
+#[tauri::command]
+pub async fn repeat_flow(state: State<'_, AppState>, id: FlowId) -> CmdResult<()> {
+    let flow = state.store.get(id).ok_or("flow not found")?;
+    let req = &flow.request;
+    send_through_proxy(&state, &req.method, &req.url(), &req.headers.0, req.body.to_vec()).await?;
+    Ok(())
+}
+
+/// A request composed by hand in the interface.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct ComposeInput {
+    method: String,
+    url: String,
+    headers: Vec<(String, String)>,
+    body_base64: String,
+}
+
+#[tauri::command]
+pub async fn send_request(state: State<'_, AppState>, request: ComposeInput) -> CmdResult<u16> {
+    let body = B64.decode(request.body_base64.as_bytes()).map_err(|e| format!("the body is not valid base64: {e}"))?;
+    send_through_proxy(&state, &request.method, &request.url, &request.headers, body).await
+}
+
+#[tauri::command]
+pub fn parse_curl(command: String) -> CmdResult<ComposeInput> {
+    let ComposedRequest { method, url, headers, body } = proxyzip_export::curl::parse(&command)?;
+    Ok(ComposeInput { method, url, headers, body_base64: B64.encode(body) })
+}
+
+#[tauri::command]
+pub fn get_rules(state: State<'_, AppState>) -> RuleSet {
+    state.rules.read().clone()
+}
+
+/// Save and apply rules. Returns messages for listeners that could not start.
+#[tauri::command]
+pub async fn save_rules(state: State<'_, AppState>, rules: RuleSet) -> CmdResult<Vec<String>> {
+    state.apply_rules(rules).await.map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+pub fn throttle_presets() -> Vec<ThrottleProfile> {
+    ThrottleProfile::PRESETS.iter().filter_map(|p| ThrottleProfile::preset(p)).collect()
+}
+
+/// Answer a flow that is paused at a breakpoint.
+#[tauri::command]
+pub async fn resolve_breakpoint(state: State<'_, AppState>, id: FlowId, mut decision: Decision) -> CmdResult<bool> {
+    if let Decision::EditRequest(edit) = &mut decision {
+        // The editor shows the decoded body, so the encoding header no longer describes it.
+        edit.headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-encoding"));
+    }
+    let hub = state.proxy.lock().await.as_ref().map(|h| h.breakpoints.clone()).ok_or("proxy is not running")?;
+    Ok(hub.resolve(id, decision))
+}
+
+/// Let every paused flow continue unchanged.
+#[tauri::command]
+pub async fn release_breakpoints(state: State<'_, AppState>) -> CmdResult<()> {
+    if let Some(h) = state.proxy.lock().await.as_ref() {
+        h.breakpoints.release_all();
+    }
     Ok(())
 }
