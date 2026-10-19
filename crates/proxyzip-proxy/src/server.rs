@@ -1,4 +1,4 @@
-use std::convert::Infallible;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -8,17 +8,19 @@ use hyper::service::service_fn;
 use hyper::{Method, Request, Response};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use proxyzip_core::{FlowStore, Scheme, TlsInfo};
+use proxyzip_rules::RuleSet;
 use proxyzip_tls::{CertificateAuthority, FileKeyLog};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
+use crate::breakpoint::BreakpointHub;
 use crate::config::{ProxyConfig, ProxySettings};
 use crate::upstream::Upstream;
-use crate::util::{ProxyBody, full, split_authority};
-use crate::{forward, tunnel};
+use crate::util::{ConnectionDropped, ProxyBody, full, split_authority};
+use crate::{forward, socks, tunnel};
 
 /// Shared state for every connection handled by one proxy instance.
 pub(crate) struct Ctx {
@@ -28,6 +30,7 @@ pub(crate) struct Ctx {
     pub upstream: Upstream,
     pub keylog: Option<Arc<dyn rustls::KeyLog>>,
     pub listen: SocketAddr,
+    pub breakpoints: Arc<BreakpointHub>,
 }
 
 /// What we know about the client connection a request arrived on.
@@ -39,6 +42,57 @@ pub(crate) struct Conn {
     /// CONNECT target when inside a tunnel.
     pub tunnel_target: Option<(String, u16)>,
     pub tls: Option<TlsInfo>,
+    /// Set on reverse proxy listeners: every request goes to this target.
+    pub reverse: Option<Arc<ReverseTarget>>,
+}
+
+/// Where a reverse proxy listener sends its traffic.
+#[derive(Debug)]
+pub(crate) struct ReverseTarget {
+    pub scheme: Scheme,
+    pub host: String,
+    pub port: u16,
+    /// Path prefix of the target URL, without a trailing slash.
+    pub base_path: String,
+}
+
+impl ReverseTarget {
+    pub(crate) fn parse(url: &str) -> Result<Self, String> {
+        let uri: hyper::Uri = url.trim().parse().map_err(|e| format!("invalid target URL {url:?}: {e}"))?;
+        let scheme = match uri.scheme_str() {
+            Some("https") => Scheme::Https,
+            Some("http") => Scheme::Http,
+            _ => return Err(format!("target URL {url:?} must start with http:// or https://")),
+        };
+        let host = uri.host().ok_or_else(|| format!("target URL {url:?} has no host"))?;
+        let port = uri.port_u16().unwrap_or(if scheme.is_secure() { 443 } else { 80 });
+        let base_path = uri.path().trim_end_matches('/').to_string();
+        Ok(Self { scheme, host: host.trim_start_matches('[').trim_end_matches(']').to_string(), port, base_path })
+    }
+}
+
+/// Listeners that run next to the main one and follow the rules.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum ExtraListener {
+    Reverse { port: u16, target: String },
+    Socks { port: u16 },
+}
+
+struct Running {
+    shutdown: watch::Sender<bool>,
+    task: JoinHandle<()>,
+}
+
+fn desired_listeners(rules: &RuleSet) -> Vec<ExtraListener> {
+    let mut wanted: Vec<_> = rules
+        .active_reverse()
+        .into_iter()
+        .map(|r| ExtraListener::Reverse { port: r.listen_port, target: r.target.clone() })
+        .collect();
+    if rules.socks.enabled && rules.socks.port != 0 {
+        wanted.push(ExtraListener::Socks { port: rules.socks.port });
+    }
+    wanted
 }
 
 pub struct ProxyServer;
@@ -47,6 +101,12 @@ pub struct ProxyServer;
 pub struct ProxyHandle {
     pub local_addr: SocketAddr,
     pub settings: Arc<RwLock<ProxySettings>>,
+    /// Resolve flows paused at breakpoints.
+    pub breakpoints: Arc<BreakpointHub>,
+    /// Reverse proxy and SOCKS5 listeners that could not start when the proxy was created.
+    pub listener_errors: Vec<String>,
+    ctx: Arc<Ctx>,
+    extras: Mutex<HashMap<ExtraListener, Running>>,
     shutdown: watch::Sender<bool>,
     task: JoinHandle<()>,
 }
@@ -54,8 +114,23 @@ pub struct ProxyHandle {
 impl ProxyHandle {
     /// Stop accepting connections. In-flight connections finish on their own.
     pub async fn shutdown(self) {
+        self.breakpoints.release_all();
+        let extras: Vec<_> = self.extras.lock().drain().map(|(_, r)| r).collect();
+        for running in extras {
+            let _ = running.shutdown.send(true);
+            let _ = running.task.await;
+        }
         let _ = self.shutdown.send(true);
         let _ = self.task.await;
+    }
+
+    /// Replace the rule set and bring the reverse proxy and SOCKS5 listeners in line with it.
+    ///
+    /// Returns one message for every listener that could not start (for example a port that is already in use).
+    pub async fn apply_rules(&self, rules: RuleSet) -> Vec<String> {
+        let wanted = desired_listeners(&rules);
+        self.settings.write().rules = Arc::new(rules);
+        sync_listeners(&self.ctx, &self.extras, wanted).await
     }
 }
 
@@ -76,14 +151,17 @@ impl ProxyServer {
             None => None,
         };
         let settings = Arc::new(RwLock::new(settings));
+        let breakpoints = BreakpointHub::new();
         let ctx = Arc::new(Ctx {
             store,
             ca,
             settings: settings.clone(),
-            upstream: Upstream::new(&config, keylog.clone()),
+            upstream: Upstream::new(&config, keylog.clone(), settings.clone()),
             keylog,
             listen: local_addr,
+            breakpoints: breakpoints.clone(),
         });
+        let ctx_for_handle = ctx.clone();
         let (tx, mut rx) = watch::channel(false);
         let task = tokio::spawn(async move {
             loop {
@@ -103,13 +181,25 @@ impl ProxyServer {
             }
         });
         tracing::info!(%local_addr, "proxy listening");
-        Ok(ProxyHandle { local_addr, settings, shutdown: tx, task })
+        let extras = Mutex::new(HashMap::new());
+        let wanted = desired_listeners(&settings.read().rules);
+        let listener_errors = sync_listeners(&ctx_for_handle, &extras, wanted).await;
+        Ok(ProxyHandle {
+            local_addr,
+            settings,
+            breakpoints,
+            listener_errors,
+            ctx: ctx_for_handle,
+            extras,
+            shutdown: tx,
+            task,
+        })
     }
 }
 
 async fn handle_client(stream: TcpStream, peer: SocketAddr, ctx: Arc<Ctx>) {
     let _ = stream.set_nodelay(true);
-    let conn = Conn { peer, scheme: Scheme::Http, tunnel_target: None, tls: None };
+    let conn = Conn { peer, scheme: Scheme::Http, tunnel_target: None, tls: None, reverse: None };
     serve_http(TokioIo::new(stream), ctx, conn).await;
 }
 
@@ -121,7 +211,7 @@ where
     let service = service_fn(move |req| {
         let ctx = ctx.clone();
         let conn = conn.clone();
-        async move { Ok::<_, Infallible>(route(req, ctx, conn).await) }
+        async move { route(req, ctx, conn).await }
     });
     let mut builder = auto::Builder::new(TokioExecutor::new());
     builder.http1().preserve_header_case(true).title_case_headers(false);
@@ -130,9 +220,9 @@ where
     }
 }
 
-async fn route(req: Request<Incoming>, ctx: Arc<Ctx>, conn: Conn) -> Response<ProxyBody> {
+async fn route(req: Request<Incoming>, ctx: Arc<Ctx>, conn: Conn) -> Result<Response<ProxyBody>, ConnectionDropped> {
     if req.method() == Method::CONNECT {
-        return connect(req, ctx, conn);
+        return Ok(connect(req, ctx, conn));
     }
     forward::forward(req, ctx, conn).await
 }
@@ -149,4 +239,79 @@ fn connect(req: Request<Incoming>, ctx: Arc<Ctx>, conn: Conn) -> Response<ProxyB
         }
     });
     Response::new(full(""))
+}
+
+/// Start the wanted extra listeners and stop the ones that are no longer wanted.
+async fn sync_listeners(
+    ctx: &Arc<Ctx>,
+    extras: &Mutex<HashMap<ExtraListener, Running>>,
+    wanted: Vec<ExtraListener>,
+) -> Vec<String> {
+    let stale: Vec<Running> = {
+        let mut running = extras.lock();
+        let gone: Vec<_> = running.keys().filter(|k| !wanted.contains(k)).cloned().collect();
+        gone.into_iter().filter_map(|k| running.remove(&k)).collect()
+    };
+    for running in stale {
+        let _ = running.shutdown.send(true);
+        let _ = running.task.await;
+    }
+    let mut errors = Vec::new();
+    for kind in wanted {
+        if extras.lock().contains_key(&kind) {
+            continue;
+        }
+        match spawn_extra(ctx.clone(), kind.clone()).await {
+            Ok(running) => {
+                extras.lock().insert(kind, running);
+            }
+            Err(e) => errors.push(e),
+        }
+    }
+    errors
+}
+
+async fn spawn_extra(ctx: Arc<Ctx>, kind: ExtraListener) -> Result<Running, String> {
+    let (port, label, reverse) = match &kind {
+        ExtraListener::Reverse { port, target } => {
+            (*port, format!("reverse proxy on port {port}"), Some(Arc::new(ReverseTarget::parse(target)?)))
+        }
+        ExtraListener::Socks { port } => (*port, format!("SOCKS5 listener on port {port}"), None),
+    };
+    let addr = SocketAddr::new(ctx.listen.ip(), port);
+    let listener = TcpListener::bind(addr).await.map_err(|e| format!("could not start the {label}: {e}"))?;
+    tracing::info!(%addr, "{label} started");
+    let (tx, mut rx) = watch::channel(false);
+    let task = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = rx.changed() => break,
+                accepted = listener.accept() => match accepted {
+                    Ok((stream, peer)) => {
+                        let ctx = ctx.clone();
+                        match &reverse {
+                            Some(target) => {
+                                let target = target.clone();
+                                tokio::spawn(async move { handle_reverse(stream, peer, ctx, target).await });
+                            }
+                            None => {
+                                tokio::spawn(async move { socks::handle(stream, peer, ctx).await });
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "accept failed");
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    }
+                }
+            }
+        }
+    });
+    Ok(Running { shutdown: tx, task })
+}
+
+async fn handle_reverse(stream: TcpStream, peer: SocketAddr, ctx: Arc<Ctx>, target: Arc<ReverseTarget>) {
+    let _ = stream.set_nodelay(true);
+    let conn = Conn { peer, scheme: target.scheme, tunnel_target: None, tls: None, reverse: Some(target) };
+    serve_http(TokioIo::new(stream), ctx, conn).await;
 }
