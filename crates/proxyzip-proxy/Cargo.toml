@@ -22,6 +22,7 @@ parking_lot.workspace = true
 proxyzip-codec.workspace = true
 proxyzip-core.workspace = true
 proxyzip-rules.workspace = true
+proxyzip-script.workspace = true
 proxyzip-tls.workspace = true
 rustls.workspace = true
 rustls-native-certs = "0.8"
