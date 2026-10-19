@@ -1,0 +1,17 @@
+[package]
+name = "proxyzip-sysproxy"
+description = "Enable/disable the operating-system HTTP(S) proxy (macOS, Windows, Linux)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+tracing.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+windows-sys = { version = "0.60", features = ["Win32_Networking_WinInet"] }
