@@ -1,0 +1,39 @@
+{
+  "name": "proxyzip-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "ProxyZip desktop app: capture, inspect and debug HTTP(S) traffic",
+  "author": "Luis Peixoto",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LuisPeixoto/ProxyZip.git",
+    "directory": "apps/desktop"
+  },
+  "homepage": "https://github.com/LuisPeixoto/ProxyZip",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-clipboard-manager": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
+    "@tauri-apps/plugin-opener": "^2"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^6",
+    "@tailwindcss/vite": "^4.3.3",
+    "@tauri-apps/cli": "^2.12.3",
+    "@tsconfig/svelte": "^5",
+    "svelte": "^5.57.2",
+    "svelte-check": "^4",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~5.9",
+    "vite": "^7"
+  }
+}
