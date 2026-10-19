@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0]
+
+Analysis.
+
+### Added
+
+- **Scripting**: `onRequest` / `onResponse` in JavaScript (QuickJS) with hashing, Base64, JWT and JSON helpers, a
+  persistent `ctx.shared`, a 2 second and 64 MB limit per run, a Console tab and a **Test with the selected request**
+  button. Errors never break traffic.
+- Viewers for **Protobuf** (with `.desc` import and gRPC path matching), **gRPC and gRPC-Web**, **MessagePack**,
+  **GraphQL** (operation shown in the list, searchable with `gql:`) and **server-sent events** that update live.
+- **jq** filters on JSON bodies, with history.
+- **Diff** of two requests and **code generation** in 14 languages.
+- A CodeMirror 6 editor for bodies, breakpoints, Compose and scripts.
+- **Sessions**: save and open `.pzsession` files, recent sessions, restore on launch, unsaved-changes indicator.
+- **CSV** and **Postman collection** export.
+- CLI: `proxyzip start --save`, `proxyzip export` and `proxyzip code`.
+
+
 ## [0.2.0]
 
 Debugging tools.
