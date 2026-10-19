@@ -6,6 +6,7 @@ use anyhow::Result;
 use parking_lot::RwLock;
 use proxyzip_core::FlowStore;
 use proxyzip_proxy::{ProxyConfig, ProxyHandle, ProxyServer, ProxySettings, SslProxyingPolicy};
+use proxyzip_rules::RuleSet;
 use proxyzip_tls::CertificateAuthority;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -51,13 +52,28 @@ impl Preferences {
         Ok(())
     }
 
-    pub fn proxy_settings(&self, recording: bool) -> ProxySettings {
+    pub fn proxy_settings(&self, recording: bool, rules: Arc<RuleSet>) -> ProxySettings {
         ProxySettings {
             ssl: self.ssl.clone(),
             recording,
             max_body_capture: self.max_body_capture_mb.max(1) * 1024 * 1024,
             insecure_upstream: self.insecure_upstream,
+            rules,
         }
+    }
+}
+
+fn rules_path(home: &std::path::Path) -> PathBuf {
+    home.join("rules.json")
+}
+
+fn load_rules(home: &std::path::Path) -> RuleSet {
+    match std::fs::read_to_string(rules_path(home)) {
+        Ok(json) => RuleSet::from_json(&json).unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "rules.json is invalid; starting without rules");
+            RuleSet::default()
+        }),
+        Err(_) => RuleSet::default(),
     }
 }
 
@@ -66,6 +82,9 @@ pub struct AppState {
     pub store: FlowStore,
     pub ca: RwLock<Arc<CertificateAuthority>>,
     pub prefs: RwLock<Preferences>,
+    pub rules: RwLock<RuleSet>,
+    /// Reverse proxy and SOCKS5 listeners that failed to start (for example, a port in use).
+    pub listener_errors: RwLock<Vec<String>>,
     pub proxy: Mutex<Option<ProxyHandle>>,
     pub listen: RwLock<Option<SocketAddr>>,
     pub last_error: RwLock<Option<String>>,
@@ -78,11 +97,14 @@ impl AppState {
         let home = proxyzip_core::data_dir();
         let ca = Arc::new(CertificateAuthority::load_or_create(&home)?);
         let prefs = Preferences::load(&home);
+        let home_for_rules = home.clone();
         let state = Self {
             store: FlowStore::new(prefs.max_flows),
             home,
             ca: RwLock::new(ca),
             prefs: RwLock::new(prefs),
+            rules: RwLock::new(load_rules(&home_for_rules)),
+            listener_errors: RwLock::new(Vec::new()),
             proxy: Mutex::new(None),
             listen: RwLock::new(None),
             last_error: RwLock::new(None),
@@ -111,9 +133,11 @@ impl AppState {
             let port = prefs.port.saturating_add(offset);
             let config = ProxyConfig { listen: SocketAddr::from((ip, port)), ..Default::default() };
             let ca = self.ca.read().clone();
-            match ProxyServer::start(config, prefs.proxy_settings(recording), ca, self.store.clone()).await {
+            let settings = prefs.proxy_settings(recording, Arc::new(self.rules.read().clone()));
+            match ProxyServer::start(config, settings, ca, self.store.clone()).await {
                 Ok(handle) => {
                     let addr = handle.local_addr;
+                    *self.listener_errors.write() = handle.listener_errors.clone();
                     *guard = Some(handle);
                     *self.listen.write() = Some(addr);
                     *self.last_error.write() = None;
@@ -132,8 +156,21 @@ impl AppState {
         if let Some(h) = self.proxy.lock().await.as_ref() {
             let mut s = h.settings.write();
             let recording = s.recording;
-            *s = prefs.proxy_settings(recording);
+            *s = prefs.proxy_settings(recording, Arc::new(self.rules.read().clone()));
         }
+    }
+
+    /// Save new rules and apply them to the running proxy. Returns messages for listeners that could not start.
+    pub async fn apply_rules(&self, rules: RuleSet) -> Result<Vec<String>> {
+        std::fs::create_dir_all(&self.home)?;
+        std::fs::write(rules_path(&self.home), rules.to_json()?)?;
+        *self.rules.write() = rules.clone();
+        let errors = match self.proxy.lock().await.as_ref() {
+            Some(handle) => handle.apply_rules(rules).await,
+            None => Vec::new(),
+        };
+        *self.listener_errors.write() = errors.clone();
+        Ok(errors)
     }
 
     /// Address clients should use (loopback even when listening on all interfaces).
