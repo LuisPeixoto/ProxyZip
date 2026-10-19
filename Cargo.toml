@@ -1,0 +1,60 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/desktop/src-tauri"]
+default-members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/LuisPeixoto/ProxyZip"
+homepage = "https://github.com/LuisPeixoto/ProxyZip"
+readme = "README.md"
+authors = ["Luis Peixoto"]
+rust-version = "1.85"
+
+[workspace.dependencies]
+proxyzip-core = { path = "crates/proxyzip-core" }
+proxyzip-tls = { path = "crates/proxyzip-tls" }
+proxyzip-codec = { path = "crates/proxyzip-codec" }
+proxyzip-proxy = { path = "crates/proxyzip-proxy" }
+proxyzip-export = { path = "crates/proxyzip-export" }
+proxyzip-sysproxy = { path = "crates/proxyzip-sysproxy" }
+proxyzip-certinstall = { path = "crates/proxyzip-certinstall" }
+
+anyhow = "1"
+thiserror = "2"
+bytes = "1"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive", "env"] }
+futures-util = "0.3"
+http = "1"
+http-body = "1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
+hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "http2", "ring", "native-tokio", "webpki-tokio", "tls12", "logging"] }
+lru = "0.16"
+parking_lot = "0.12"
+rcgen = { version = "0.14", features = ["pem", "x509-parser"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-pemfile = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+time = "0.3"
+tokio = { version = "1", features = ["full"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+tokio-tungstenite = "0.27"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
+dirs = "6"
+flate2 = "1"
+brotli = "8"
+zstd = "0.13"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
