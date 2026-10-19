@@ -5,7 +5,7 @@ use std::sync::Arc;
 use hyper::Response;
 
 use crate::server::Ctx;
-use crate::util::{ProxyBody, full};
+use crate::util::{ProxyBody, format_authority, full, split_authority};
 
 /// Browse to `http://proxyzip.cert` through the proxy to download the root CA.
 pub const CERT_HOST: &str = "proxyzip.cert";
@@ -18,7 +18,8 @@ pub(crate) fn is_local(host: &str, port: u16, ctx: &Ctx) -> bool {
     port == ctx.listen.port() && matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1" | "0.0.0.0")
 }
 
-pub(crate) fn respond(path: &str, ctx: &Arc<Ctx>) -> Response<ProxyBody> {
+/// `host_header` is the `Host` the client used to reach us, so a PAC file points back at the same address.
+pub(crate) fn respond(path: &str, ctx: &Arc<Ctx>, host_header: Option<&str>) -> Response<ProxyBody> {
     match path.split('?').next().unwrap_or("/") {
         "/ca.pem" | "/proxyzip-ca.pem" => Response::builder()
             .header("content-type", "application/x-pem-file")
@@ -30,8 +31,25 @@ pub(crate) fn respond(path: &str, ctx: &Arc<Ctx>) -> Response<ProxyBody> {
             .header("content-disposition", "attachment; filename=\"proxyzip-ca.crt\"")
             .body(full(ctx.ca.cert_der().to_vec()))
             .unwrap(),
+        "/proxy.pac" | "/proxy.pac.js" | "/wpad.dat" => Response::builder()
+            .header("content-type", "application/x-ns-proxy-autoconfig")
+            .body(full(pac_script(ctx, host_header)))
+            .unwrap(),
         _ => Response::builder().header("content-type", "text/html; charset=utf-8").body(full(PAGE)).unwrap(),
     }
+}
+
+fn pac_script(ctx: &Ctx, host_header: Option<&str>) -> String {
+    let from_header = host_header
+        .map(|h| split_authority(h, ctx.listen.port()).0)
+        .filter(|h| !h.is_empty() && !h.eq_ignore_ascii_case(CERT_HOST));
+    let host = from_header.unwrap_or_else(|| {
+        if ctx.listen.ip().is_unspecified() { "127.0.0.1".to_string() } else { ctx.listen.ip().to_string() }
+    });
+    let address = format_authority(&host, ctx.listen.port());
+    format!(
+        "function FindProxyForURL(url, host) {{\n  if (isPlainHostName(host) || shExpMatch(host, \"*.local\") || host === \"127.0.0.1\") return \"DIRECT\";\n  return \"PROXY {address}; DIRECT\";\n}}\n"
+    )
 }
 
 const PAGE: &str = r#"<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
