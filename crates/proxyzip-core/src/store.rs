@@ -6,15 +6,29 @@ use parking_lot::RwLock;
 use serde::Serialize;
 use tokio::sync::broadcast;
 
-use crate::{Flow, FlowId, FlowSummary, Request, WsMessage};
+use crate::{BreakpointPhase, Flow, FlowId, FlowSummary, Request, WsMessage};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FlowEvent {
-    Created { flow: FlowSummary },
-    Updated { flow: FlowSummary },
-    WsMessage { id: FlowId, message: WsMessage },
-    Removed { ids: Vec<FlowId> },
+    Created {
+        flow: FlowSummary,
+    },
+    Updated {
+        flow: FlowSummary,
+    },
+    WsMessage {
+        id: FlowId,
+        message: WsMessage,
+    },
+    /// A flow stopped at a breakpoint and needs a decision.
+    BreakpointHit {
+        id: FlowId,
+        phase: BreakpointPhase,
+    },
+    Removed {
+        ids: Vec<FlowId>,
+    },
     Cleared,
 }
 
@@ -108,6 +122,10 @@ impl FlowStore {
         };
         self.emit(FlowEvent::Updated { flow: summary });
         Some(result)
+    }
+
+    pub fn notify_breakpoint(&self, id: FlowId, phase: BreakpointPhase) {
+        self.emit(FlowEvent::BreakpointHit { id, phase });
     }
 
     pub fn push_ws_message(&self, id: FlowId, message: WsMessage) {
