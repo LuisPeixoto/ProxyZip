@@ -40,6 +40,18 @@
     clock: "M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0 -18 0M12 7v5l3 2",
     comment: "M4 4h16v12H8l-4 4z",
     power: "M12 2v10M18.4 6.6a9 9 0 1 1-12.8 0",
+    wrench: "M14.7 6.3a4 4 0 0 0 5 5L21 13l-8 8a2.8 2.8 0 0 1-4-4l8-8zM14.7 6.3 18 3l3 3-3.3 3.3",
+    send: "M22 2 11 13M22 2l-7 20-4-9-9-4z",
+    plus: "M12 5v14M5 12h14",
+    ban: "M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0 -18 0M5.6 5.6l12.8 12.8",
+    edit: "M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z",
+    play: "M6 4l14 8-14 8z",
+    sliders: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
+    shuffle: "M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5",
+    gauge: "M12 14l4-4M3.3 17a10 10 0 1 1 17.4 0",
+    network: "M12 3v6M5 21v-6a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v6M9 3h6v6H9zM2 21h6v0M16 21h6",
+    eye: "M2 12s4-8 10-8 10 8 10 8-4 8-10 8-10-8-10-8zM12 12m-3 0a3 3 0 1 0 6 0a3 3 0 1 0 -6 0",
+    file: "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6",
   };
   let { name, size = 16, class: cls = "", stroke = 1.8 }: { name: string; size?: number; class?: string; stroke?: number } = $props();
 </script>

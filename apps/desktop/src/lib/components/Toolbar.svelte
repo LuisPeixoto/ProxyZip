@@ -83,6 +83,39 @@
     {st?.ca_installed ? "HTTPS ready" : "Install certificate"}
   </button>
 
+  <button
+    onclick={() => app.openTools()}
+    title="Tools: block, map, rewrite, breakpoints, network conditions… (⌘T)"
+    class="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium text-muted hover:bg-hover hover:text-fg"
+  >
+    <Icon name="wrench" size={14} /> <span class="hidden xl:inline">Tools</span>
+  </button>
+  <button
+    onclick={() => app.openComposer()}
+    title="Compose a request (⌘N)"
+    class="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium text-muted hover:bg-hover hover:text-fg"
+  >
+    <Icon name="send" size={14} /> <span class="hidden xl:inline">Compose</span>
+  </button>
+  {#if app.paused.length}
+    <button
+      onclick={() => (app.breakpointHidden = false)}
+      title="Requests are waiting at a breakpoint"
+      class="flex h-8 items-center gap-1.5 rounded-lg bg-warn/15 px-2.5 text-[12px] font-medium text-warn hover:bg-warn/25"
+    >
+      <Icon name="pause" size={14} /> {app.paused.length} paused
+    </button>
+  {/if}
+  {#if app.throttleLabel}
+    <button
+      onclick={() => app.openTools("throttle")}
+      title="Network throttling is on"
+      class="flex h-8 items-center gap-1.5 rounded-lg bg-accent-soft px-2.5 text-[12px] font-medium text-accent hover:opacity-80"
+    >
+      <Icon name="gauge" size={14} /> {app.throttleLabel}
+    </button>
+  {/if}
+
   <div data-tauri-drag-region class="flex flex-1 justify-center px-2">
     <label class="group relative flex h-8 w-full max-w-[560px] items-center">
       <Icon name="search" size={14} class="pointer-events-none absolute left-2.5 text-faint" />

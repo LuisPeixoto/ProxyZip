@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 export type FlowId = number;
 export type Scheme = "http" | "https" | "ws" | "wss";
-export type FlowState = "pending" | "receiving" | "web_socket_open" | "completed" | "failed" | "tunnel";
+export type FlowState = "pending" | "receiving" | "web_socket_open" | "completed" | "failed" | "tunnel" | "paused";
 
 export interface FlowSummary {
   id: FlowId;
@@ -25,6 +25,7 @@ export interface FlowSummary {
   ws_message_count: number;
   pinned: boolean;
   has_comment: boolean;
+  tags: string[];
 }
 
 export type Headers = [string, string][];
@@ -90,6 +91,7 @@ export type FlowEvent =
   | { type: "created"; flow: FlowSummary }
   | { type: "updated"; flow: FlowSummary }
   | { type: "ws_message"; id: FlowId; message: unknown }
+  | { type: "breakpoint_hit"; id: FlowId; phase: "request" | "response" }
   | { type: "removed"; ids: FlowId[] }
   | { type: "cleared" };
 
@@ -106,6 +108,7 @@ export interface Status {
   ca_path: string;
   lan_addresses: string[];
   platform: string;
+  listener_errors: string[];
 }
 
 export interface Preferences {
@@ -116,6 +119,125 @@ export interface Preferences {
   insecure_upstream: boolean;
   max_flows: number;
 }
+
+// ---- Rules -----------------------------------------------------------------------------------------------------------
+
+export interface Matcher {
+  methods: string[];
+  pattern: string;
+  regex: boolean;
+}
+export type BlockAction = { type: "status"; code: number } | { type: "drop" };
+export interface BlockRule {
+  name: string;
+  enabled: boolean;
+  matcher: Matcher;
+  action: BlockAction;
+}
+export type LocalSource = { type: "file"; path: string } | { type: "directory"; path: string };
+export interface MapLocalRule {
+  name: string;
+  enabled: boolean;
+  matcher: Matcher;
+  source: LocalSource;
+  status: number;
+  headers: [string, string][];
+  content_type: string | null;
+}
+export interface MapRemoteRule {
+  name: string;
+  enabled: boolean;
+  matcher: Matcher;
+  scheme: string | null;
+  host: string | null;
+  port: number | null;
+  path: string | null;
+  keep_host_header: boolean;
+}
+export type RewriteOp =
+  | { type: "set_header"; name: string; value: string }
+  | { type: "add_header"; name: string; value: string }
+  | { type: "remove_header"; name: string }
+  | { type: "set_query"; name: string; value: string }
+  | { type: "remove_query"; name: string }
+  | { type: "set_status"; status: number }
+  | { type: "replace_body"; find: string; replace: string; regex: boolean };
+export interface RewriteRule {
+  name: string;
+  enabled: boolean;
+  matcher: Matcher;
+  phase: "request" | "response";
+  ops: RewriteOp[];
+}
+export interface BreakpointRule {
+  name: string;
+  enabled: boolean;
+  matcher: Matcher;
+  on_request: boolean;
+  on_response: boolean;
+}
+export interface ThrottleProfile {
+  name: string;
+  latency_ms: number;
+  download_kbps: number;
+  upload_kbps: number;
+}
+export interface DnsRule {
+  name: string;
+  enabled: boolean;
+  host: string;
+  ip: string | null;
+}
+export interface UpstreamProxy {
+  enabled: boolean;
+  kind: "http" | "socks5";
+  host: string;
+  port: number;
+  username: string | null;
+  password: string | null;
+  bypass: string[];
+}
+export interface ReverseRule {
+  name: string;
+  enabled: boolean;
+  listen_port: number;
+  target: string;
+}
+export interface RuleSet {
+  tools: {
+    block: boolean;
+    map_local: boolean;
+    map_remote: boolean;
+    rewrite: boolean;
+    breakpoints: boolean;
+    dns: boolean;
+    reverse: boolean;
+  };
+  block: BlockRule[];
+  record_only: { enabled: boolean; matchers: Matcher[] };
+  map_local: MapLocalRule[];
+  map_remote: MapRemoteRule[];
+  rewrite: RewriteRule[];
+  breakpoints: BreakpointRule[];
+  throttle: { enabled: boolean; profile: ThrottleProfile; matchers: Matcher[] };
+  dns: DnsRule[];
+  upstream: UpstreamProxy;
+  reverse: ReverseRule[];
+  socks: { enabled: boolean; port: number };
+}
+
+export interface ComposeInput {
+  method: string;
+  url: string;
+  headers: [string, string][];
+  body_base64: string;
+}
+
+export type Decision =
+  | { type: "continue" }
+  | { type: "abort" }
+  | { type: "edit_request"; method: string; url: string; headers: [string, string][]; body_base64: string }
+  | { type: "edit_response"; status: number; headers: [string, string][]; body_base64: string };
 
 export const api = {
   getFlows: () => invoke<FlowSummary[]>("get_flows"),
@@ -139,6 +261,13 @@ export const api = {
   importHar: (path: string) => invoke<number>("import_har", { path }),
   terminalEnv: () => invoke<string>("terminal_env"),
   repeatFlow: (id: FlowId) => invoke<void>("repeat_flow", { id }),
+  sendRequest: (request: ComposeInput) => invoke<number>("send_request", { request }),
+  parseCurl: (command: string) => invoke<ComposeInput>("parse_curl", { command }),
+  getRules: () => invoke<RuleSet>("get_rules"),
+  saveRules: (rules: RuleSet) => invoke<string[]>("save_rules", { rules }),
+  throttlePresets: () => invoke<ThrottleProfile[]>("throttle_presets"),
+  resolveBreakpoint: (id: FlowId, decision: Decision) => invoke<boolean>("resolve_breakpoint", { id, decision }),
+  releaseBreakpoints: () => invoke<void>("release_breakpoints"),
   sslToggleHost: (host: string, exclude: boolean) => invoke<void>("ssl_proxying_toggle_host", { host, exclude }),
 };
 
@@ -165,4 +294,44 @@ export function formatTime(ts: number): string {
 
 export function errorText(e: unknown): string {
   return typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e);
+}
+
+/** Encode text as base64 (UTF-8). */
+export function textToBase64(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
+}
+
+/** Decode base64 into text, or null when the bytes are not valid UTF-8. */
+export function base64ToText(b64: string): string | null {
+  try {
+    const binary = atob(b64);
+    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+export function emptyRules(): RuleSet {
+  return {
+    tools: { block: true, map_local: true, map_remote: true, rewrite: true, breakpoints: true, dns: true, reverse: true },
+    block: [],
+    record_only: { enabled: false, matchers: [] },
+    map_local: [],
+    map_remote: [],
+    rewrite: [],
+    breakpoints: [],
+    throttle: { enabled: false, profile: { name: "Custom", latency_ms: 0, download_kbps: 0, upload_kbps: 0 }, matchers: [] },
+    dns: [],
+    upstream: { enabled: false, kind: "http", host: "", port: 8080, username: null, password: null, bypass: [] },
+    reverse: [],
+    socks: { enabled: false, port: 9394 },
+  };
+}
+
+export function newMatcher(pattern = ""): Matcher {
+  return { methods: [], pattern, regex: false };
 }

@@ -47,3 +47,23 @@ export function typeLabel(ct: string | null): string {
   if (c.startsWith("text/")) return "Text";
   return c.split("/").pop() ?? c;
 }
+
+/** Colour for the small labels that say what happened to a request. */
+export function tagClass(tag: string): string {
+  switch (tag) {
+    case "blocked":
+      return "bg-err/15 text-err";
+    case "map-local":
+    case "map-remote":
+      return "bg-accent-2/15 text-accent-2";
+    case "rewrite":
+    case "edited":
+      return "bg-info/15 text-info";
+    case "breakpoint":
+      return "bg-warn/15 text-warn";
+    case "throttle":
+      return "bg-faint/20 text-muted";
+    default:
+      return "bg-accent-soft text-accent";
+  }
+}
