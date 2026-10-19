@@ -17,13 +17,12 @@ Map Remote · Block lists · Rewrite rules (headers, query, status, body) · Thr
 Upstream proxy (HTTP and SOCKS5) · Reverse proxy · SOCKS5 listener · PAC file · Record-only filter. See
 [Tools](tools.md).
 
-## Phase 3: Analysis
+## ✅ Phase 3: Analysis
 
-- [ ] Scripting in JavaScript (`onRequest` / `onResponse`) with a library of helpers
-- [ ] Previewers for Protobuf (with descriptor import), gRPC, MessagePack, GraphQL and server-sent events
-- [ ] Diff two requests · code generation for popular languages
-- [ ] JSONPath / jq filters on bodies · a full code editor for large bodies
-- [ ] Persistent sessions and workspaces · import from other proxy session formats and CSV
+JavaScript scripting with helpers · Protobuf (with descriptor import), gRPC, gRPC-Web, MessagePack, GraphQL and live
+server-sent events viewers · jq filters · Diff · code generation in 14 languages · CodeMirror editor for bodies ·
+`.pzsession` sessions with recent and restore-on-launch · CSV and Postman export · `proxyzip export` and
+`proxyzip code`. See [Scripting](scripting.md), [Inspecting bodies](inspecting.md) and [Sessions](sessions.md).
 
 ## Phase 4: Ecosystem
 
