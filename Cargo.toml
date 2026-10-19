@@ -18,6 +18,7 @@ proxyzip-core = { path = "crates/proxyzip-core" }
 proxyzip-tls = { path = "crates/proxyzip-tls" }
 proxyzip-codec = { path = "crates/proxyzip-codec" }
 proxyzip-proxy = { path = "crates/proxyzip-proxy" }
+proxyzip-rules = { path = "crates/proxyzip-rules" }
 proxyzip-export = { path = "crates/proxyzip-export" }
 proxyzip-sysproxy = { path = "crates/proxyzip-sysproxy" }
 proxyzip-certinstall = { path = "crates/proxyzip-certinstall" }
