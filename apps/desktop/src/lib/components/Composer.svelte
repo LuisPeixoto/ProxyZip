@@ -1,6 +1,8 @@
 <script lang="ts">
   import { app } from "../stores/app.svelte";
   import { api, base64ToText, errorText, textToBase64, type ComposeInput } from "../api";
+  import { languageForMime } from "../editor";
+  import CodeEditor from "./CodeEditor.svelte";
   import HeadersEditor from "./HeadersEditor.svelte";
   import Icon from "./Icon.svelte";
 
@@ -16,6 +18,7 @@
   let curl = $state("");
   let sending = $state(false);
   let lastStatus = $state<number | null>(null);
+  const bodyLanguage = $derived(languageForMime(headers.find(([k]) => k.toLowerCase() === "content-type")?.[1]));
 
   async function importCurl() {
     try {
@@ -97,7 +100,9 @@
         {#if binary}
           <p class="rounded-lg border border-dashed border-line px-3 py-4 text-center text-faint">The original body is binary and will be sent unchanged.</p>
         {:else}
-          <textarea bind:value={body} spellcheck="false" rows="9" placeholder="No body" class="mono w-full resize-y rounded-lg border border-line bg-panel p-2.5 text-[12px] outline-none placeholder:text-faint focus:border-accent"></textarea>
+          <div class="h-[240px] overflow-hidden rounded-lg border border-line bg-panel focus-within:border-accent">
+            <CodeEditor value={body} onchange={(v) => (body = v)} readOnly={false} language={bodyLanguage} placeholder="No body" />
+          </div>
         {/if}
       </div>
     </div>
