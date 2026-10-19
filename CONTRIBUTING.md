@@ -49,6 +49,8 @@ Tips:
 |------|-------|
 | Request lifecycle, TLS interception | `crates/proxyzip-proxy/src/{server,tunnel,forward,websocket}.rs` |
 | Certificates | `crates/proxyzip-tls/src/ca.rs` |
+| Rules (matching, rewriting, planning) | `crates/proxyzip-rules/src` |
+| Breakpoints, throttling, SOCKS5 | `crates/proxyzip-proxy/src/{breakpoint,throttle,socks}.rs` |
 | Data model and events | `crates/proxyzip-core/src` |
 | Body decoding | `crates/proxyzip-codec/src/lib.rs` |
 | HAR and cURL | `crates/proxyzip-export/src` |
