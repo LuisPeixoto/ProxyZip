@@ -3302,7 +3302,7 @@ dependencies = [
 
 [[package]]
 name = "proxyzip-certinstall"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "dirs 6.0.0",
@@ -3312,25 +3312,28 @@ dependencies = [
 
 [[package]]
 name = "proxyzip-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
+ "percent-encoding",
  "proxyzip-certinstall",
  "proxyzip-core",
  "proxyzip-export",
  "proxyzip-proxy",
+ "proxyzip-rules",
  "proxyzip-sysproxy",
  "proxyzip-tls",
  "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
 name = "proxyzip-codec"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "brotli 8.0.4",
@@ -3345,7 +3348,7 @@ dependencies = [
 
 [[package]]
 name = "proxyzip-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "chrono",
@@ -3357,7 +3360,7 @@ dependencies = [
 
 [[package]]
 name = "proxyzip-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3368,6 +3371,7 @@ dependencies = [
  "proxyzip-core",
  "proxyzip-export",
  "proxyzip-proxy",
+ "proxyzip-rules",
  "proxyzip-sysproxy",
  "proxyzip-tls",
  "reqwest 0.12.28",
@@ -3385,7 +3389,7 @@ dependencies = [
 
 [[package]]
 name = "proxyzip-export"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3400,9 +3404,10 @@ dependencies = [
 
 [[package]]
 name = "proxyzip-proxy"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "bytes",
  "flate2",
  "futures-util",
@@ -3413,7 +3418,9 @@ dependencies = [
  "hyper-rustls",
  "hyper-util",
  "parking_lot",
+ "proxyzip-codec",
  "proxyzip-core",
+ "proxyzip-rules",
  "proxyzip-tls",
  "rcgen",
  "reqwest 0.12.28",
@@ -3423,14 +3430,30 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-tungstenite",
+ "tower-service",
  "tracing",
  "tracing-subscriber",
  "webpki-roots",
 ]
 
 [[package]]
+name = "proxyzip-rules"
+version = "0.2.0"
+dependencies = [
+ "bytes",
+ "flate2",
+ "proxyzip-codec",
+ "proxyzip-core",
+ "regex",
+ "serde",
+ "serde_json",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "proxyzip-sysproxy"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -3441,7 +3464,7 @@ dependencies = [
 
 [[package]]
 name = "proxyzip-tls"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "lru",
