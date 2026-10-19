@@ -45,6 +45,15 @@
   --info: #2563eb;
   --select: rgb(106 77 255 / 0.12);
   --shadow: 0 10px 40px -10px rgb(20 24 36 / 0.25), 0 2px 8px rgb(20 24 36 / 0.06);
+  --tok-key: #7c3aed;
+  --tok-str: #059669;
+  --tok-num: #d97706;
+  --tok-bool: #2563eb;
+  --tok-null: #db2777;
+  --tok-comment: #8b93a7;
+  --tok-fn: #0369a1;
+  --diff-add: rgb(5 150 105 / 0.14);
+  --diff-del: rgb(220 38 38 / 0.13);
   color-scheme: light;
 }
 
@@ -68,6 +77,15 @@
   --info: #60a5fa;
   --select: rgb(139 109 255 / 0.2);
   --shadow: 0 16px 50px -12px rgb(0 0 0 / 0.7), 0 2px 10px rgb(0 0 0 / 0.35);
+  --tok-key: #c4b5fd;
+  --tok-str: #86efac;
+  --tok-num: #fcd34d;
+  --tok-bool: #93c5fd;
+  --tok-null: #f9a8d4;
+  --tok-comment: #6b7388;
+  --tok-fn: #7dd3fc;
+  --diff-add: rgb(52 211 153 / 0.16);
+  --diff-del: rgb(248 113 113 / 0.16);
   color-scheme: dark;
 }
 
@@ -145,18 +163,13 @@ button {
   box-shadow: var(--shadow);
 }
 
-/* JSON / code token colours */
-.tok-key { color: #7c3aed; }
-.tok-str { color: #059669; }
-.tok-num { color: #d97706; }
-.tok-bool { color: #2563eb; }
-.tok-null { color: #db2777; }
+/* JSON / code token colours (also used by the editor theme) */
+.tok-key { color: var(--tok-key); }
+.tok-str { color: var(--tok-str); }
+.tok-num { color: var(--tok-num); }
+.tok-bool { color: var(--tok-bool); }
+.tok-null { color: var(--tok-null); }
 .tok-punct { color: var(--faint); }
-[data-theme="dark"] .tok-key { color: #c4b5fd; }
-[data-theme="dark"] .tok-str { color: #86efac; }
-[data-theme="dark"] .tok-num { color: #fcd34d; }
-[data-theme="dark"] .tok-bool { color: #93c5fd; }
-[data-theme="dark"] .tok-null { color: #f9a8d4; }
 
 @keyframes pulse-ring {
   0% { box-shadow: 0 0 0 0 rgb(248 113 113 / 0.55); }

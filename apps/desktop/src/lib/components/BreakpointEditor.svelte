@@ -1,6 +1,8 @@
 <script lang="ts">
   import { app } from "../stores/app.svelte";
   import { api, base64ToText, errorText, formatBytes, textToBase64, type Decision, type FlowDetail } from "../api";
+  import { languageForMime } from "../editor";
+  import CodeEditor from "./CodeEditor.svelte";
   import HeadersEditor from "./HeadersEditor.svelte";
   import Icon from "./Icon.svelte";
 
@@ -22,6 +24,7 @@
   let busy = $state(false);
 
   const current = $derived(app.paused[0]);
+  const bodyLanguage = $derived(languageForMime(draft?.headers.find(([k]) => k.toLowerCase() === "content-type")?.[1]));
 
   const snapshot = (d: Draft) => JSON.stringify([d.method, d.url, d.status, d.headers, d.text]);
   const dirty = $derived(draft ? snapshot(draft) !== original : false);
@@ -132,7 +135,9 @@
             <span class="mono text-[11px] text-faint">{formatBytes(draft.size)}</span>
           </div>
           {#if draft.text !== null}
-            <textarea bind:value={draft.text} spellcheck="false" rows="10" placeholder="No body" class="mono w-full resize-y rounded-lg border border-line bg-panel p-2.5 text-[12px] outline-none placeholder:text-faint focus:border-accent"></textarea>
+            <div class="h-[280px] overflow-hidden rounded-lg border border-line bg-panel focus-within:border-accent">
+              <CodeEditor value={draft.text} onchange={(v) => draft && (draft.text = v)} readOnly={false} language={bodyLanguage} placeholder="No body" />
+            </div>
           {:else}
             <p class="rounded-lg border border-dashed border-line px-3 py-4 text-center text-faint">This body is binary, so it is passed through unchanged.</p>
           {/if}
