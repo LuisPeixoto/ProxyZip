@@ -17,3 +17,13 @@ serde.workspace = true
 serde_json.workspace = true
 url.workspace = true
 zstd.workspace = true
+graphql-parser = "0.4"
+jaq-core = "3"
+jaq-json = "2"
+jaq-std = { version = "3", features = ["format", "math", "regex"] }
+prost = "0.14"
+prost-reflect = { version = "0.16", features = ["serde"] }
+rmpv = "1"
+
+[dev-dependencies]
+prost-types = "0.14"
