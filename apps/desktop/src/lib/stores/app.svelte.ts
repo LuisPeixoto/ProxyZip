@@ -7,6 +7,7 @@ import {
   type FlowEvent,
   type FlowId,
   type FlowSummary,
+  type RecentSession,
   type RuleSet,
   type Status,
 } from "../api";
@@ -27,6 +28,8 @@ export type ToolsTab =
   | "map_remote"
   | "rewrite"
   | "breakpoints"
+  | "scripts"
+  | "protobuf"
   | "throttle"
   | "dns"
   | "network"
@@ -106,12 +109,16 @@ export function parseSearch(q: string): Pred {
         case "path":
           p = (f) => f.path.toLowerCase().includes(v);
           break;
+        case "gql":
+        case "graphql":
+          p = (f) => (f.graphql ?? "").toLowerCase().includes(v);
+          break;
         default:
           p = (f) => f.url.toLowerCase().includes(tok.toLowerCase());
       }
     } else {
       const t = tok.toLowerCase();
-      p = (f) => f.url.toLowerCase().includes(t);
+      p = (f) => f.url.toLowerCase().includes(t) || (f.graphql ?? "").toLowerCase().includes(t);
     }
     preds.push(neg ? (f) => !p(f) : p);
   }
@@ -159,6 +166,15 @@ class AppStore {
   toolsTab = $state<ToolsTab>("block");
   /** The request being composed, or null when the composer is closed. */
   composer = $state<ComposeInput | null>(null);
+  /** The request whose code is being generated, or null. */
+  codeFor = $state<FlowId | null>(null);
+  /** The two requests being compared, or null. */
+  diff = $state<[FlowId, FlowId] | null>(null);
+  recent = $state<RecentSession[]>([]);
+  /** A session file the user chose to open, waiting for "replace or add?". */
+  pendingOpen = $state<string | null>(null);
+  /** New traffic has arrived since the session was last saved or opened. */
+  dirty = $state(false);
   /** The breakpoint editor is hidden while the user keeps working; it reappears for new pauses. */
   breakpointHidden = $state(false);
   toasts = $state<Toast[]>([]);
@@ -251,6 +267,7 @@ class AppStore {
     await this.reload();
     await this.refreshStatus();
     await this.reloadRules();
+    await this.refreshRecent();
     await listen<FlowEvent[]>("proxyzip://events", (e) => this.apply(e.payload));
     await listen("proxyzip://resync", () => this.reload());
     setInterval(() => this.refreshStatus(), 5000);
@@ -260,6 +277,18 @@ class AppStore {
     const list = await api.getFlows();
     this.#index = new Map(list.map((f, i) => [f.id, i]));
     this.flows = list;
+  }
+
+  async refreshRecent() {
+    try {
+      this.recent = await api.recentSessions();
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  markSaved() {
+    this.dirty = false;
   }
 
   async reloadRules() {
@@ -305,6 +334,7 @@ class AppStore {
     for (const ev of events) {
       switch (ev.type) {
         case "created": {
+          this.dirty = true;
           ensureCopy();
           this.#index.set(ev.flow.id, list.length);
           list.push(ev.flow);
@@ -327,6 +357,7 @@ class AppStore {
           break;
         }
         case "cleared":
+          this.dirty = false;
           list = [];
           copied = true;
           rebuild = true;
