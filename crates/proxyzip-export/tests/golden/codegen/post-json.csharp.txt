@@ -1,0 +1,7 @@
+using var client = new HttpClient();
+using var request = new HttpRequestMessage(new HttpMethod("POST"), "https://api.example.com/v1/items?id=2");
+request.Headers.TryAddWithoutValidation("Authorization", "Bearer abc");
+request.Headers.TryAddWithoutValidation("X-Note", "it's \"quoted\" $5 #{x}");
+request.Content = new StringContent("{\"name\":\"ada\",\"note\":\"line1\\nline2 \\\"q\\\" $x\"}", Encoding.UTF8, "application/json");
+var response = await client.SendAsync(request);
+Console.WriteLine($"{(int)response.StatusCode} {await response.Content.ReadAsStringAsync()}");

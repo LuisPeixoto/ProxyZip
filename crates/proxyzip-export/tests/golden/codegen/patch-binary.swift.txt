@@ -1,0 +1,11 @@
+import Foundation
+
+var request = URLRequest(url: URL(string: "https://api.example.com/v1/items?id=2")!)
+request.httpMethod = "PATCH"
+request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+request.setValue("Bearer abc", forHTTPHeaderField: "Authorization")
+request.setValue("it's \"quoted\" $5 #{x}", forHTTPHeaderField: "X-Note")
+request.httpBody = Data(base64Encoded: "/wAB")
+
+let (data, response) = try await URLSession.shared.data(for: request)
+print((response as! HTTPURLResponse).statusCode, String(decoding: data, as: UTF8.self))

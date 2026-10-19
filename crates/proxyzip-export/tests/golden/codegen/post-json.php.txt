@@ -1,0 +1,14 @@
+$ch = curl_init('https://api.example.com/v1/items?id=2');
+curl_setopt_array($ch, [
+    CURLOPT_CUSTOMREQUEST => 'POST',
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_HTTPHEADER => [
+        'Content-Type: application/json',
+        'Authorization: Bearer abc',
+        'X-Note: it\'s "quoted" $5 #{x}',
+    ],
+    CURLOPT_POSTFIELDS => '{"name":"ada","note":"line1\\nline2 \\"q\\" $x"}',
+]);
+$response = curl_exec($ch);
+echo curl_getinfo($ch, CURLINFO_HTTP_CODE), " ", $response, "\n";
+curl_close($ch);

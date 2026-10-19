@@ -1,0 +1,10 @@
+HttpClient client = HttpClient.newHttpClient();
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.example.com/v1/items?id=2"))
+    .method("GET", HttpRequest.BodyPublishers.noBody())
+    .header("Content-Type", "application/json")
+    .header("Authorization", "Bearer abc")
+    .header("X-Note", "it's \"quoted\" $5 #{x}")
+    .build();
+HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+System.out.println(response.statusCode() + " " + response.body());

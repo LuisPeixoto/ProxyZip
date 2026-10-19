@@ -1,0 +1,11 @@
+let client = reqwest::Client::new();
+let response = client
+    .patch("https://api.example.com/v1/items?id=2")
+    .header("Content-Type", "application/json")
+    .header("Authorization", "Bearer abc")
+    .header("X-Note", "it's \"quoted\" $5 #{x}")
+    // needs the `base64` crate: use base64::Engine as _;
+    .body(base64::engine::general_purpose::STANDARD.decode("/wAB").unwrap())
+    .send()
+    .await?;
+println!("{} {}", response.status(), response.text().await?);

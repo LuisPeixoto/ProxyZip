@@ -1,0 +1,6 @@
+$headers = @{
+  'Authorization' = 'Bearer abc'
+  'X-Note' = 'it''s "quoted" $5 #{x}'
+}
+
+Invoke-WebRequest -Uri 'https://api.example.com/v1/items?id=2' -Method POST -Headers $headers -ContentType 'application/json' -Body '{"name":"ada","note":"line1\nline2 \"q\" $x"}'

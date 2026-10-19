@@ -1,0 +1,15 @@
+import base64
+import requests
+
+response = requests.request(
+    "PATCH",
+    "https://api.example.com/v1/items?id=2",
+    headers={
+        "Content-Type": "application/json",
+        "Authorization": "Bearer abc",
+        "X-Note": "it's \"quoted\" $5 #{x}",
+    },
+    data=base64.b64decode("/wAB"),
+)
+print(response.status_code)
+print(response.text)

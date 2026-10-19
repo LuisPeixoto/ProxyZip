@@ -1,0 +1,10 @@
+let client = reqwest::Client::new();
+let response = client
+    .post("https://api.example.com/v1/items?id=2")
+    .header("Content-Type", "application/json")
+    .header("Authorization", "Bearer abc")
+    .header("X-Note", "it's \"quoted\" $5 #{x}")
+    .body("{\"name\":\"ada\",\"note\":\"line1\\nline2 \\\"q\\\" $x\"}")
+    .send()
+    .await?;
+println!("{} {}", response.status(), response.text().await?);
