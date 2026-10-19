@@ -1,0 +1,36 @@
+[package]
+name = "proxyzip-proxy"
+description = "The ProxyZip intercepting proxy engine (HTTP/1.1, HTTP/2, WebSocket, TLS MITM)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+bytes.workspace = true
+futures-util.workspace = true
+http.workspace = true
+http-body.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-rustls.workspace = true
+hyper-util.workspace = true
+parking_lot.workspace = true
+proxyzip-core.workspace = true
+proxyzip-tls.workspace = true
+rustls.workspace = true
+rustls-native-certs = "0.8"
+serde.workspace = true
+tokio.workspace = true
+tokio-rustls.workspace = true
+tokio-tungstenite.workspace = true
+tracing.workspace = true
+webpki-roots = "1"
+
+[dev-dependencies]
+rcgen.workspace = true
+flate2.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-manual-roots", "http2", "gzip"] }
+tracing-subscriber.workspace = true
