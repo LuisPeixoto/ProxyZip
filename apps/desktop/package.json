@@ -1,7 +1,7 @@
 {
   "name": "proxyzip-desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "ProxyZip desktop app: capture, inspect and debug HTTP(S) traffic",
   "author": "Luis Peixoto",
   "license": "MIT",
