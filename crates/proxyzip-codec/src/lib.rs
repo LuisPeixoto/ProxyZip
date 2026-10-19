@@ -1,11 +1,18 @@
 //! Turns raw captured bodies into something a human can read: removes
 //! content-encoding, classifies the payload and prepares text/pretty views.
 
+pub mod graphql;
+pub mod msgpack;
+pub mod protobuf;
+pub mod query;
+pub mod sse;
+
 use std::io::Read;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
 use bytes::Bytes;
+pub use protobuf::ProtoRegistry;
 use proxyzip_core::Headers;
 use serde::Serialize;
 
@@ -31,6 +38,16 @@ pub enum BodyKind {
     Binary,
 }
 
+/// A body decoded into a structured form: Protobuf, gRPC, MessagePack, event streams or GraphQL.
+#[derive(Debug, Clone, Serialize)]
+pub struct Structured {
+    /// `protobuf`, `grpc`, `msgpack`, `sse` or `graphql`.
+    pub format: String,
+    pub json: serde_json::Value,
+    /// A hint for the user, such as "import a descriptor set to see field names".
+    pub note: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct BodyView {
     pub kind: BodyKind,
@@ -47,6 +64,7 @@ pub struct BodyView {
     /// Decoded bytes, base64 (for hex/image viewers). Omitted when huge.
     pub base64: Option<String>,
     pub truncated: bool,
+    pub structured: Option<Structured>,
 }
 
 /// Remove `Content-Encoding` layers (applied in reverse order of listing).
@@ -148,11 +166,36 @@ pub fn pretty_form(text: &str) -> String {
     url::form_urlencoded::parse(text.as_bytes()).map(|(k, v)| format!("{k} = {v}")).collect::<Vec<_>>().join("\n")
 }
 
+/// Everything needed to present a body. `path` is the request path (including the query); it names the gRPC method.
+#[derive(Clone, Copy)]
+pub struct ViewContext<'a> {
+    pub headers: &'a Headers,
+    pub body: &'a [u8],
+    pub truncated: bool,
+    pub path: &'a str,
+    pub is_request: bool,
+    pub protos: Option<&'a ProtoRegistry>,
+    /// Message type chosen by the user for plain Protobuf bodies, such as `demo.HelloRequest`.
+    pub message_type: Option<&'a str>,
+}
+
+impl<'a> ViewContext<'a> {
+    pub fn new(headers: &'a Headers, body: &'a [u8], truncated: bool) -> Self {
+        Self { headers, body, truncated, path: "", is_request: false, protos: None, message_type: None }
+    }
+}
+
 /// Build the full presentation of a body.
 pub fn view(headers: &Headers, body: &[u8], truncated: bool) -> BodyView {
+    view_with(ViewContext::new(headers, body, truncated))
+}
+
+pub fn view_with(ctx: ViewContext<'_>) -> BodyView {
+    let ViewContext { headers, body, truncated, .. } = ctx;
     let (decoded, encodings, decode_error) = decode_content(headers, body);
     let mime = headers.get("content-type").map(str::to_string);
     let kind = classify(mime.as_deref(), &decoded);
+    let structured = if truncated { None } else { structured(&ctx, &decoded) };
     let textual = !matches!(kind, BodyKind::Image | BodyKind::Binary | BodyKind::Protobuf | BodyKind::Empty);
     let text = (textual && decoded.len() <= MAX_TEXT_BYTES).then(|| String::from_utf8_lossy(&decoded).into_owned());
     let pretty = match (&kind, &text) {
@@ -172,7 +215,151 @@ pub fn view(headers: &Headers, body: &[u8], truncated: bool) -> BodyView {
         pretty,
         base64,
         truncated,
+        structured,
     }
+}
+
+fn structured(ctx: &ViewContext<'_>, decoded: &[u8]) -> Option<Structured> {
+    if decoded.is_empty() {
+        return None;
+    }
+    let content_type = ctx.headers.get("content-type").unwrap_or("").to_ascii_lowercase();
+    let essence = content_type.split(';').next().unwrap_or("").trim();
+    let make =
+        |format: &str, json: serde_json::Value, note: Option<String>| Structured { format: format.into(), json, note };
+
+    if essence.contains("grpc") {
+        return Some(decode_grpc(ctx, essence, decoded));
+    }
+    if matches!(essence, "application/x-protobuf" | "application/protobuf" | "application/vnd.google.protobuf") {
+        return Some(decode_protobuf(ctx, decoded));
+    }
+    if matches!(essence, "application/msgpack" | "application/x-msgpack" | "application/vnd.msgpack") {
+        return Some(match msgpack::decode(decoded) {
+            Ok(json) => make("msgpack", json, None),
+            Err(e) => make("msgpack", serde_json::Value::Null, Some(format!("Could not decode MessagePack: {e}"))),
+        });
+    }
+    if essence == "text/event-stream" {
+        let events = sse::parse(&String::from_utf8_lossy(decoded));
+        return Some(make("sse", serde_json::Value::Array(events), None));
+    }
+    if ctx.is_request
+        && let Some(json) = graphql::describe(decoded)
+    {
+        return Some(make("graphql", json, None));
+    }
+    None
+}
+
+fn decode_protobuf(ctx: &ViewContext<'_>, data: &[u8]) -> Structured {
+    let make = |json, note| Structured { format: "protobuf".into(), json, note };
+    if let (Some(registry), Some(name)) = (ctx.protos, ctx.message_type) {
+        match registry.message(name) {
+            Some(descriptor) => match protobuf::decode_with(data, &descriptor) {
+                Ok(json) => return make(json, Some(format!("Decoded as {name}."))),
+                Err(e) => {
+                    return match protobuf::decode_raw(data) {
+                        Ok(json) => {
+                            make(json, Some(format!("Could not decode as {name} ({e}); showing the raw fields.")))
+                        }
+                        Err(raw) => make(
+                            serde_json::Value::Null,
+                            Some(format!("Could not decode as {name}: {e}; and not raw Protobuf either: {raw}")),
+                        ),
+                    };
+                }
+            },
+            None => {
+                let note = format!("The message type {name} is not in the imported schemas; showing the raw fields.");
+                return match protobuf::decode_raw(data) {
+                    Ok(json) => make(json, Some(note)),
+                    Err(e) => make(serde_json::Value::Null, Some(format!("Not valid Protobuf: {e}"))),
+                };
+            }
+        }
+    }
+    match protobuf::decode_raw(data) {
+        Ok(json) => make(json, Some("No schema: showing field numbers. Import a descriptor set and map this URL to a message type to see names.".into())),
+        Err(e) => make(serde_json::Value::Null, Some(format!("Not valid Protobuf: {e}"))),
+    }
+}
+
+fn decode_grpc(ctx: &ViewContext<'_>, essence: &str, data: &[u8]) -> Structured {
+    use base64::Engine;
+    let make = |json, note| Structured { format: "grpc".into(), json, note };
+    let owned: Vec<u8>;
+    let mut data = data;
+    if essence.contains("grpc-web-text") {
+        // gRPC-Web text mode wraps the binary frames in base64.
+        let compact: String = String::from_utf8_lossy(data).split_whitespace().collect();
+        match B64.decode(compact.as_bytes()) {
+            Ok(bytes) => {
+                owned = bytes;
+                data = &owned;
+            }
+            Err(e) => {
+                return make(serde_json::Value::Null, Some(format!("The gRPC-Web text body is not valid base64: {e}")));
+            }
+        }
+    }
+    let frames = match protobuf::split_frames(data) {
+        Ok(frames) => frames,
+        Err(e) => return make(serde_json::Value::Null, Some(format!("Not a valid gRPC stream: {e}"))),
+    };
+    let path = ctx.path.split('?').next().unwrap_or("");
+    let method = ctx.protos.and_then(|r| r.method(path));
+    let descriptor = method.as_ref().map(|m| if ctx.is_request { m.input() } else { m.output() });
+    let encoding = ctx
+        .headers
+        .get("grpc-encoding")
+        .or_else(|| ctx.headers.get("grpc-message-encoding"))
+        .map(str::to_ascii_lowercase);
+
+    let mut messages = Vec::new();
+    let mut trailers = None;
+    for frame in &frames {
+        let payload = if frame.compressed {
+            match encoding.as_deref().map(|e| decode_one(e, &frame.payload)) {
+                Some(Ok(bytes)) => bytes,
+                Some(Err(e)) => {
+                    messages.push(serde_json::json!({ "error": format!("could not decompress: {e}") }));
+                    continue;
+                }
+                None => {
+                    messages.push(serde_json::json!({ "error": "compressed frame without a grpc-encoding header" }));
+                    continue;
+                }
+            }
+        } else {
+            frame.payload.clone()
+        };
+        if frame.trailers {
+            trailers = Some(String::from_utf8_lossy(&payload).into_owned());
+            continue;
+        }
+        let decoded = match &descriptor {
+            Some(d) => protobuf::decode_with(&payload, d),
+            None => protobuf::decode_raw(&payload),
+        };
+        messages.push(decoded.unwrap_or_else(|e| serde_json::json!({ "error": e })));
+    }
+    let mut json = serde_json::json!({
+        "method": path,
+        "direction": if ctx.is_request { "request" } else { "response" },
+        "messages": messages,
+    });
+    if let Some(t) = trailers {
+        json["trailers"] = serde_json::json!(t);
+    }
+    let note = if descriptor.is_some() {
+        method.as_ref().map(|m| format!("Decoded with {}.", m.full_name()))
+    } else if ctx.protos.is_some_and(|r| !r.is_empty()) {
+        Some(format!("No schema for {path}: showing field numbers."))
+    } else {
+        Some("No schema: showing field numbers. Import a descriptor set to see field names.".into())
+    };
+    make(json, note)
 }
 
 #[cfg(test)]
