@@ -43,6 +43,42 @@ enum Command {
     },
     /// Print a HAR file's requests as cURL commands.
     HarToCurl { file: PathBuf },
+    /// Convert a HAR file or a ProxyZip session into another format.
+    Export(ExportArgs),
+    /// Print the code that sends a captured request, in one of 14 languages.
+    Code(CodeArgs),
+}
+
+#[derive(clap::Args)]
+struct ExportArgs {
+    /// A `.har` file or a `.pzsession` session.
+    input: PathBuf,
+    /// Output format.
+    #[arg(short, long, value_enum)]
+    format: ExportFormat,
+    /// Write to this file instead of standard output (required for `session`).
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum ExportFormat {
+    Csv,
+    Postman,
+    Har,
+    Session,
+}
+
+#[derive(clap::Args)]
+struct CodeArgs {
+    /// A `.har` file or a `.pzsession` session.
+    input: PathBuf,
+    /// Language: curl, httpie, powershell, python, javascript, node-axios, go, rust, java, kotlin, swift, csharp, php or ruby.
+    #[arg(short, long, default_value = "curl")]
+    lang: String,
+    /// Which request to use (1 is the first).
+    #[arg(short, long, default_value_t = 1)]
+    number: usize,
 }
 
 #[derive(clap::Args)]
@@ -58,6 +94,9 @@ struct StartArgs {
     /// Write everything captured to this HAR file on exit.
     #[arg(long)]
     har: Option<PathBuf>,
+    /// Save everything captured to a ProxyZip session file (.pzsession) on exit.
+    #[arg(long, value_name = "FILE")]
+    save: Option<PathBuf>,
     /// Never decrypt these hosts (wildcards allowed). Repeatable.
     #[arg(long = "exclude", value_name = "HOST")]
     exclude: Vec<String>,
@@ -150,6 +189,8 @@ async fn main() -> Result<()> {
             println!("{}", proxyzip_certinstall::terminal_env(&host, port, &ca.cert_path().unwrap()));
             Ok(())
         }
+        Command::Export(args) => export(args),
+        Command::Code(args) => code(args),
         Command::HarToCurl { file } => {
             let json = std::fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
             for flow in proxyzip_export::har::import(&json)? {
@@ -285,6 +326,63 @@ async fn start(home: PathBuf, args: StartArgs) -> Result<()> {
         std::fs::write(&path, proxyzip_export::har::export_json(&flows)?)?;
         eprintln!("Wrote {} flows to {}", flows.len(), path.display());
     }
+    if let Some(path) = args.save {
+        let flows = store.all();
+        std::fs::write(&path, proxyzip_export::session::write(&flows)?)?;
+        eprintln!("Saved {} flows to {}", flows.len(), path.display());
+    }
+    Ok(())
+}
+
+/// Read flows from a `.pzsession` or a HAR file, judging by the extension.
+fn load_flows(path: &std::path::Path) -> Result<Vec<proxyzip_core::Flow>> {
+    let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    let is_session = path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("pzsession"));
+    if is_session {
+        proxyzip_export::session::read(&bytes)
+    } else {
+        proxyzip_export::har::import(&String::from_utf8_lossy(&bytes))
+    }
+}
+
+fn export(args: ExportArgs) -> Result<()> {
+    let flows = load_flows(&args.input)?;
+    let text = match args.format {
+        ExportFormat::Csv => proxyzip_export::csv::export(&flows),
+        ExportFormat::Har => proxyzip_export::har::export_json(&flows)?,
+        ExportFormat::Postman => {
+            let name = args.input.file_stem().and_then(|s| s.to_str()).unwrap_or("ProxyZip").to_string();
+            proxyzip_export::postman::export_json(&name, &flows)?
+        }
+        ExportFormat::Session => {
+            let output = args.output.as_ref().context("the session format is binary: choose a file with --output")?;
+            std::fs::write(output, proxyzip_export::session::write(&flows)?)?;
+            eprintln!("Wrote {} flows to {}", flows.len(), output.display());
+            return Ok(());
+        }
+    };
+    match &args.output {
+        Some(path) => {
+            std::fs::write(path, text)?;
+            eprintln!("Wrote {} flows to {}", flows.len(), path.display());
+        }
+        None => print!("{text}"),
+    }
+    Ok(())
+}
+
+fn code(args: CodeArgs) -> Result<()> {
+    let language = proxyzip_export::codegen::Language::from_id(&args.lang).with_context(|| {
+        let all: Vec<_> = proxyzip_export::codegen::Language::ALL.iter().map(|l| l.id()).collect();
+        format!("unknown language {:?}; use one of {}", args.lang, all.join(", "))
+    })?;
+    let flows: Vec<_> = load_flows(&args.input)?.into_iter().filter(|f| f.request.method != "CONNECT").collect();
+    let flow = args
+        .number
+        .checked_sub(1)
+        .and_then(|i| flows.get(i))
+        .with_context(|| format!("there is no request number {} (the file has {})", args.number, flows.len()))?;
+    println!("{}", proxyzip_export::codegen::generate(flow, language));
     Ok(())
 }
 
@@ -419,5 +517,63 @@ mod tests {
         assert!(build_rules(&args(&["--reverse", "nope"])).unwrap_err().to_string().contains("PORT=URL"));
         assert!(build_rules(&args(&["--throttle", "warp"])).unwrap_err().to_string().contains("edge"));
         assert!(build_rules(&args(&["--rules", "/definitely/missing.json"])).is_err());
+    }
+
+    fn sample_session() -> (std::path::PathBuf, std::path::PathBuf) {
+        use proxyzip_core::{Flow, Headers, Request, Scheme};
+        let dir = std::env::temp_dir().join(format!(
+            "proxyzip-cli-test-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let flow = Flow::new(
+            1,
+            "127.0.0.1:1".into(),
+            Request {
+                method: "GET".into(),
+                scheme: Scheme::Https,
+                host: "api.example.com".into(),
+                port: 443,
+                path: "/v1/items".into(),
+                http_version: "HTTP/1.1".into(),
+                headers: Headers(vec![("accept".into(), "application/json".into())]),
+                body: Default::default(),
+                body_truncated: false,
+            },
+        );
+        let path = dir.join("demo.pzsession");
+        std::fs::write(&path, proxyzip_export::session::write(&[flow]).unwrap()).unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn export_converts_sessions() {
+        let (dir, session) = sample_session();
+        let csv = dir.join("out.csv");
+        export(ExportArgs { input: session.clone(), format: ExportFormat::Csv, output: Some(csv.clone()) }).unwrap();
+        assert!(std::fs::read_to_string(&csv).unwrap().contains("https://api.example.com/v1/items"));
+        let postman = dir.join("out.json");
+        export(ExportArgs { input: session.clone(), format: ExportFormat::Postman, output: Some(postman.clone()) })
+            .unwrap();
+        assert!(std::fs::read_to_string(&postman).unwrap().contains("collection/v2.1.0"));
+        let har = dir.join("out.har");
+        export(ExportArgs { input: session.clone(), format: ExportFormat::Har, output: Some(har.clone()) }).unwrap();
+        // The HAR we wrote can be loaded again.
+        assert_eq!(load_flows(&har).unwrap().len(), 1);
+        let err = export(ExportArgs { input: session, format: ExportFormat::Session, output: None }).unwrap_err();
+        assert!(err.to_string().contains("--output"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn code_validates_its_arguments() {
+        let (dir, session) = sample_session();
+        assert!(code(CodeArgs { input: session.clone(), lang: "python".into(), number: 1 }).is_ok());
+        let unknown = code(CodeArgs { input: session.clone(), lang: "cobol".into(), number: 1 }).unwrap_err();
+        assert!(unknown.to_string().contains("python"), "{unknown}");
+        let missing = code(CodeArgs { input: session, lang: "go".into(), number: 5 }).unwrap_err();
+        assert!(missing.to_string().contains("no request number 5"));
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
