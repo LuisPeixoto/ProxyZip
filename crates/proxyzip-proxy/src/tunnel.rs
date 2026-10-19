@@ -8,12 +8,10 @@ use rustls::ServerConfig;
 use rustls::server::{Acceptor, ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
-use tokio::net::TcpStream;
 use tokio_rustls::LazyConfigAcceptor;
 
 use crate::rewind::Rewind;
 use crate::server::{Conn, Ctx, serve_http};
-use crate::util::format_authority;
 
 const TLS_HANDSHAKE: u8 = 0x16;
 
@@ -40,7 +38,7 @@ where
         }
     } else if looks_like_http(&prefix) {
         // Plain HTTP (or ws://) sent through a CONNECT tunnel.
-        let conn = Conn { peer, scheme: Scheme::Http, tunnel_target: Some((host, port)), tls: None };
+        let conn = Conn { peer, scheme: Scheme::Http, tunnel_target: Some((host, port)), tls: None, reverse: None };
         serve_http(TokioIo::new(io), ctx, conn).await;
     } else {
         raw_tunnel(io, host, port, ctx, peer).await;
@@ -106,7 +104,7 @@ where
         version: session.protocol_version().map(|v| format!("{v:?}").replace('_', ".")),
         cipher: session.negotiated_cipher_suite().map(|c| format!("{:?}", c.suite())),
     };
-    let conn = Conn { peer, scheme: Scheme::Https, tunnel_target: Some((host, port)), tls: Some(info) };
+    let conn = Conn { peer, scheme: Scheme::Https, tunnel_target: Some((host, port)), tls: Some(info), reverse: None };
     serve_http(TokioIo::new(tls), ctx, conn).await;
 }
 
@@ -153,8 +151,7 @@ where
         id
     });
     let result = async {
-        let mut upstream = TcpStream::connect(format_authority(&host, port)).await?;
-        upstream.set_nodelay(true)?;
+        let mut upstream = crate::upstream::connect_tcp(&ctx.settings, &host, port).await?;
         tokio::io::copy_bidirectional(&mut io, &mut upstream).await
     }
     .await;
