@@ -3,6 +3,9 @@
   import { app } from "./lib/stores/app.svelte";
   import { api } from "./lib/api";
   import { remove, repeat } from "./lib/actions";
+  import BreakpointEditor from "./lib/components/BreakpointEditor.svelte";
+  import Composer from "./lib/components/Composer.svelte";
+  import ToolsPanel from "./lib/components/ToolsPanel.svelte";
   import Toolbar from "./lib/components/Toolbar.svelte";
   import Sidebar from "./lib/components/Sidebar.svelte";
   import FilterBar from "./lib/components/FilterBar.svelte";
@@ -38,6 +41,12 @@
     } else if (mod && e.key.toLowerCase() === "r") {
       e.preventDefault(); // never reload the webview
       if (app.focused != null) repeat(app.focused);
+    } else if (mod && e.key.toLowerCase() === "t") {
+      e.preventDefault();
+      app.openTools();
+    } else if (mod && e.key.toLowerCase() === "n") {
+      e.preventDefault();
+      app.openComposer();
     } else if (mod && e.key === ",") {
       e.preventDefault();
       app.settingsOpen = true;
@@ -82,4 +91,7 @@
 </div>
 
 {#if app.settingsOpen}<SettingsModal />{/if}
+{#if app.toolsOpen}<ToolsPanel />{/if}
+{#if app.composer}<Composer />{/if}
+<BreakpointEditor />
 <Toasts />
