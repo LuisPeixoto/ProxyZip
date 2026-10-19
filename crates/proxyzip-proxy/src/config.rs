@@ -1,6 +1,8 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 
+use proxyzip_rules::{RuleSet, wildcard_match};
 use rustls::pki_types::CertificateDer;
 use serde::{Deserialize, Serialize};
 
@@ -47,7 +49,7 @@ impl SslProxyingPolicy {
 }
 
 /// Settings that can be changed while the proxy is running.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ProxySettings {
     pub ssl: SslProxyingPolicy,
     /// When false traffic is still proxied but not stored.
@@ -56,6 +58,8 @@ pub struct ProxySettings {
     pub max_body_capture: usize,
     /// Skip upstream certificate verification (debugging self-signed servers).
     pub insecure_upstream: bool,
+    /// Block, map, rewrite, breakpoint, throttle and network rules. Cheap to clone.
+    pub rules: Arc<RuleSet>,
 }
 
 impl Default for ProxySettings {
@@ -65,50 +69,14 @@ impl Default for ProxySettings {
             recording: true,
             max_body_capture: 32 * 1024 * 1024,
             insecure_upstream: false,
+            rules: Arc::default(),
         }
     }
-}
-
-/// Case-insensitive glob match supporting `*` (any run) and `?` (one char).
-pub fn wildcard_match(pattern: &str, text: &str) -> bool {
-    let p: Vec<char> = pattern.to_ascii_lowercase().chars().collect();
-    let t: Vec<char> = text.to_ascii_lowercase().chars().collect();
-    let (mut pi, mut ti) = (0, 0);
-    let (mut star, mut mark) = (None, 0);
-    while ti < t.len() {
-        if pi < p.len() && (p[pi] == '?' || p[pi] == t[ti]) {
-            pi += 1;
-            ti += 1;
-        } else if pi < p.len() && p[pi] == '*' {
-            star = Some(pi);
-            mark = ti;
-            pi += 1;
-        } else if let Some(s) = star {
-            pi = s + 1;
-            mark += 1;
-            ti = mark;
-        } else {
-            return false;
-        }
-    }
-    while pi < p.len() && p[pi] == '*' {
-        pi += 1;
-    }
-    pi == p.len()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn wildcard() {
-        assert!(wildcard_match("*.example.com", "api.example.com"));
-        assert!(!wildcard_match("*.example.com", "example.com"));
-        assert!(wildcard_match("api.*", "API.github.com"));
-        assert!(wildcard_match("h?st", "host"));
-        assert!(wildcard_match("*", "anything"));
-    }
 
     #[test]
     fn policy() {
