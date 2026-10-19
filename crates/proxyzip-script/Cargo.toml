@@ -1,0 +1,26 @@
+[package]
+name = "proxyzip-script"
+description = "JavaScript scripting for ProxyZip: run user scripts on requests and responses in a sandboxed QuickJS runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+base64.workspace = true
+hmac = "0.12"
+md-5 = "0.10"
+proxyzip-core.workspace = true
+rquickjs = "0.14"
+serde.workspace = true
+# Header order matters, so JSON objects must keep the order scripts see.
+serde_json = { workspace = true, features = ["preserve_order"] }
+sha1 = "0.10"
+sha2 = "0.10"
+tokio = { workspace = true, features = ["sync"] }
+tracing.workspace = true
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros", "time"] }
