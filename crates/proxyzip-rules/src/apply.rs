@@ -52,6 +52,11 @@ fn decode_in_place(headers: &mut Headers, body: &mut Bytes) -> bool {
     true
 }
 
+/// Make a request body readable (decoded, no content-length). Returns whether it was encoded.
+pub fn decode_request_body(req: &mut RequestParts) -> bool {
+    decode_in_place(&mut req.headers, &mut req.body)
+}
+
 /// Make a response body readable (decoded, no content-length). Returns whether it was encoded.
 pub fn decode_response_body(res: &mut ResponseParts) -> bool {
     decode_in_place(&mut res.headers, &mut res.body)
