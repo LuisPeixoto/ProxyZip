@@ -59,6 +59,10 @@ export function tagClass(tag: string): string {
     case "rewrite":
     case "edited":
       return "bg-info/15 text-info";
+    case "script":
+      return "bg-accent-2/15 text-accent-2";
+    case "script-error":
+      return "bg-err/15 text-err";
     case "breakpoint":
       return "bg-warn/15 text-warn";
     case "throttle":
