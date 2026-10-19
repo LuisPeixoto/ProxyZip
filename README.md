@@ -22,6 +22,7 @@
   <a href="#install">Install</a> ·
   <a href="#features">Features</a> ·
   <a href="docs/getting-started.md">Getting started</a> ·
+  <a href="docs/scripting.md">Scripting</a> ·
   <a href="docs/cli.md">CLI</a> ·
   <a href="docs/architecture.md">Architecture</a> ·
   <a href="docs/roadmap.md">Roadmap</a> ·
@@ -42,7 +43,8 @@ It ships as a native desktop app and as a scriptable command-line tool, and both
 - **Change what happens.** Pause and edit requests, mock responses from disk, redirect hosts, rewrite headers and
   bodies, throttle the network and more, all without touching your code.
 - **Fast with huge sessions.** A virtualized list stays smooth with tens of thousands of requests.
-- **Made to be understood.** Collapsible JSON tree, hex dump, image and HTML preview, timing breakdown, TLS details.
+- **Made to be understood.** JSON tree, **Protobuf, gRPC, GraphQL, MessagePack** and live **SSE** viewers, jq filters, Diff, timing breakdown, TLS details.
+- **Scriptable.** Change requests and responses with a few lines of JavaScript, with a one-click test run.
 - **Zero-friction setup.** One click installs the certificate and routes your system through ProxyZip. One command
   does the same for a terminal.
 - **Honest errors.** When a client rejects the certificate or a server fails, you get a failed flow with an explanation
@@ -83,6 +85,8 @@ It ships as a native desktop app and as a scriptable command-line tool, and both
       <ul>
         <li>Headers, query, cookies and Set-Cookie</li>
         <li>JSON tree, pretty, raw and hex views</li>
+        <li>Protobuf, gRPC, GraphQL, MessagePack, SSE</li>
+        <li>jq filters and request Diff</li>
         <li>Image and HTML preview</li>
         <li>gzip, deflate, Brotli and Zstandard decoding</li>
         <li>WebSocket message timeline</li>
@@ -96,7 +100,9 @@ It ships as a native desktop app and as a scriptable command-line tool, and both
       <ul>
         <li>Copy as <b>cURL</b>, URL or body</li>
         <li><b>Repeat</b> a request</li>
-        <li><b>HAR 1.2</b> import and export</li>
+        <li><b>HAR 1.2</b> import and export, CSV, Postman</li>
+        <li>Code in 14 languages</li>
+        <li>Save and reopen sessions</li>
         <li>Pin, delete and multi-select</li>
         <li>System proxy on macOS, Windows and Linux</li>
         <li>Certificate install on macOS, Windows, Linux and iOS Simulator</li>
@@ -139,6 +145,23 @@ do that without touching your code. Everything lives in **Tools** (`⌘T`), and 
 
 Details and examples are in [Tools](docs/tools.md). The same rules work from the [command line](docs/cli.md) with
 `--rules rules.json`.
+
+## Understand and script
+
+<p align="center">
+  <img src="docs/images/traffic-structured.png" alt="GraphQL operations, script tags and binary formats in the traffic list" />
+</p>
+
+| Feature | What it does |
+|---------|--------------|
+| **Scripts** | `onRequest` and `onResponse` in JavaScript, with hashing, Base64, JWT helpers and a test button. See [Scripting](docs/scripting.md) |
+| **Binary and structured viewers** | Protobuf with descriptor import, gRPC and gRPC-Web, MessagePack, GraphQL, live server-sent events |
+| **jq** | Filter any JSON body with a jq expression |
+| **Diff** | Compare two requests and their responses side by side |
+| **Code** | Generate the request in cURL, Python, JavaScript, Go, Rust, Java, Kotlin, Swift, C#, PHP, Ruby and more |
+| **Sessions** | Save and reopen `.pzsession` files, restore the last session, export CSV and Postman collections |
+
+Details are in [Inspecting bodies](docs/inspecting.md) and [Sessions](docs/sessions.md).
 
 ## Install
 
@@ -200,6 +223,9 @@ Terms combine with AND. See [Filtering](docs/filtering.md) for the full referenc
 | `⌘E` / `Ctrl+E` | Pause or resume recording |
 | `⌘T` / `Ctrl+T` | Open Tools |
 | `⌘N` / `Ctrl+N` | Compose a request |
+| `⌘S` / `Ctrl+S` | Save the session |
+| `⌘O` / `Ctrl+O` | Open a session |
+| `⌘D` / `Ctrl+D` | Compare the two selected requests |
 | `⌘⇧K` / `Ctrl+Shift+K` | Clear the session |
 | `⌘R` / `Ctrl+R` | Repeat the selected request |
 | `⌘,` / `Ctrl+,` | Open settings |
@@ -213,6 +239,9 @@ Terms combine with AND. See [Filtering](docs/filtering.md) for the full referenc
 | [Getting started](docs/getting-started.md) | First capture on a computer, phone or emulator |
 | [Certificates](docs/certificates.md) | How the CA works and how to trust it on every platform |
 | [Tools](docs/tools.md) | Breakpoints, Map Local and Remote, Rewrite, Throttling and the rest, with the rules file format |
+| [Scripting](docs/scripting.md) | The JavaScript API, helpers, limits and examples |
+| [Inspecting bodies](docs/inspecting.md) | Viewers, Protobuf and gRPC, jq, Diff and code generation |
+| [Sessions](docs/sessions.md) | Save, open and export captures |
 | [Command line](docs/cli.md) | Every `proxyzip` command and option |
 | [Filtering](docs/filtering.md) | The filter query language |
 | [Troubleshooting](docs/troubleshooting.md) | Certificate errors, apps that ignore the proxy, and more |
@@ -227,8 +256,9 @@ crates/
   proxyzip-proxy        tokio + hyper engine: CONNECT, TLS interception, HTTP/1.1, HTTP/2, WebSocket
   proxyzip-tls          Root CA, per-host certificates, TLS key logging
   proxyzip-rules        Rule model and engine: block, map, rewrite, breakpoints, throttling, DNS and more
-  proxyzip-codec        Content decoding, body classification and pretty-printing
-  proxyzip-export       HAR 1.2 import and export, cURL generation
+  proxyzip-script       QuickJS scripting runtime with time and memory limits
+  proxyzip-codec        Content decoding, classification, and the Protobuf, gRPC, MessagePack, SSE, GraphQL and jq viewers
+  proxyzip-export       HAR, sessions, CSV, Postman and code generation
   proxyzip-sysproxy     Operating-system proxy settings
   proxyzip-certinstall  Operating-system trust stores
   proxyzip-cli          The `proxyzip` command
