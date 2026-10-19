@@ -31,8 +31,20 @@ proxyzip start --exclude '*.apple.com' --filter '*api*' --verbose
 | `--filter <GLOB>` | Only print requests whose URL matches the wildcard. |
 | `--insecure` | Do not verify upstream server certificates. |
 | `--keylog <FILE>` | Append TLS secrets in NSS key log format, for decrypting captures in Wireshark. |
+| `--rules <FILE>` | Load [rules](tools.md#rules-file) (block, map, rewrite, throttling, …) from a JSON file. The options below add to them. |
+| `--socks-port <PORT>` | Also accept SOCKS5 clients on this port. |
+| `--upstream-proxy <URL>` | Chain through another proxy: `http://[user:pass@]host:port` or `socks5://[user:pass@]host:port`. |
+| `--reverse <PORT=URL>` | Expose a server on a local port, e.g. `8081=https://api.example.com`. Repeatable. |
+| `--throttle <PRESET>` | Simulate a slow network: `edge`, `3g`, `4g` or `wifi-poor`. |
 | `-v, --verbose` | Print request and response headers. |
 | `-q, --quiet` | Do not print requests. |
+
+Requests that a rule touched carry a tag in the output, such as `[blocked]`, `[map-local]` or `[rewrite, throttle]`.
+Breakpoints need a person to edit the traffic, so they are only available in the desktop app.
+
+```bash
+proxyzip start --rules rules.json --throttle 3g --socks-port 1081 --reverse 8081=https://api.example.com
+```
 
 Press `Ctrl+C` to stop. If the system proxy was enabled by ProxyZip, it is turned off again.
 

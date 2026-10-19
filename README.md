@@ -39,6 +39,8 @@ It ships as a native desktop app and as a scriptable command-line tool, and both
 ## Highlights
 
 - **Everything in the open.** HTTP/1.1, **HTTP/2** and **WebSocket**, with HTTPS decrypted on the fly.
+- **Change what happens.** Pause and edit requests, mock responses from disk, redirect hosts, rewrite headers and
+  bodies, throttle the network and more, all without touching your code.
 - **Fast with huge sessions.** A virtualized list stays smooth with tens of thousands of requests.
 - **Made to be understood.** Collapsible JSON tree, hex dump, image and HTML preview, timing breakdown, TLS details.
 - **Zero-friction setup.** One click installs the certificate and routes your system through ProxyZip. One command
@@ -99,11 +101,44 @@ It ships as a native desktop app and as a scriptable command-line tool, and both
         <li>System proxy on macOS, Windows and Linux</li>
         <li>Certificate install on macOS, Windows, Linux and iOS Simulator</li>
         <li>Phones and emulators over the LAN</li>
+        <li>Right-click to set breakpoints, map or block</li>
         <li>Dark and light themes</li>
       </ul>
     </td>
   </tr>
 </table>
+
+## Debug and change traffic
+
+Seeing a problem is the first step. Fixing it means changing what the app sends and receives, and ProxyZip lets you
+do that without touching your code. Everything lives in **Tools** (`⌘T`), and most of it is one right-click away.
+
+<p align="center">
+  <img src="docs/images/traffic-rules.png" alt="Requests tagged blocked, map-local, rewrite, map-remote and throttle" />
+</p>
+<p align="center"><sub>Every request shows what happened to it: <code>blocked</code>, <code>map-local</code>, <code>map-remote</code>, <code>rewrite</code>, <code>throttle</code>.</sub></p>
+
+| Tool | What it does |
+|------|--------------|
+| **Breakpoints** | Pause a request or response, edit method, URL, headers, status and body, then continue or abort |
+| **Compose** | Build a request by hand, import a cURL command, or **Edit & repeat** any captured request |
+| **Map Local** | Answer from a file or folder on your computer: mock an API in seconds |
+| **Map Remote** | Send requests somewhere else: production → staging, API → `localhost` |
+| **Rewrite** | Set, add or remove headers and query parameters, change status codes, replace body text |
+| **Block** | Return an error status or drop the connection for chosen hosts |
+| **Throttling** | Edge, 3G, LTE and poor Wi-Fi presets, or your own latency and bandwidth |
+| **DNS overrides** | Resolve any name to any address without editing your hosts file |
+| **Upstream proxy** | Chain through an HTTP or SOCKS5 proxy, with authentication and a bypass list |
+| **Reverse proxy** | Expose a remote server on a local port and record everything |
+| **SOCKS5 listener** | Accept SOCKS5 clients, decrypted and recorded like any other traffic |
+| **Record only** | Keep the list focused on the hosts you care about |
+
+<p align="center">
+  <img src="docs/images/breakpoint.png" alt="The breakpoint editor holding a POST request" />
+</p>
+
+Details and examples are in [Tools](docs/tools.md). The same rules work from the [command line](docs/cli.md) with
+`--rules rules.json`.
 
 ## Install
 
@@ -163,6 +198,8 @@ Terms combine with AND. See [Filtering](docs/filtering.md) for the full referenc
 |----------|--------|
 | `⌘K` / `Ctrl+K` | Focus the filter |
 | `⌘E` / `Ctrl+E` | Pause or resume recording |
+| `⌘T` / `Ctrl+T` | Open Tools |
+| `⌘N` / `Ctrl+N` | Compose a request |
 | `⌘⇧K` / `Ctrl+Shift+K` | Clear the session |
 | `⌘R` / `Ctrl+R` | Repeat the selected request |
 | `⌘,` / `Ctrl+,` | Open settings |
@@ -175,6 +212,7 @@ Terms combine with AND. See [Filtering](docs/filtering.md) for the full referenc
 |-------|---------------|
 | [Getting started](docs/getting-started.md) | First capture on a computer, phone or emulator |
 | [Certificates](docs/certificates.md) | How the CA works and how to trust it on every platform |
+| [Tools](docs/tools.md) | Breakpoints, Map Local and Remote, Rewrite, Throttling and the rest, with the rules file format |
 | [Command line](docs/cli.md) | Every `proxyzip` command and option |
 | [Filtering](docs/filtering.md) | The filter query language |
 | [Troubleshooting](docs/troubleshooting.md) | Certificate errors, apps that ignore the proxy, and more |
@@ -188,6 +226,7 @@ crates/
   proxyzip-core         Flow model, bounded in-memory store, event bus
   proxyzip-proxy        tokio + hyper engine: CONNECT, TLS interception, HTTP/1.1, HTTP/2, WebSocket
   proxyzip-tls          Root CA, per-host certificates, TLS key logging
+  proxyzip-rules        Rule model and engine: block, map, rewrite, breakpoints, throttling, DNS and more
   proxyzip-codec        Content decoding, body classification and pretty-printing
   proxyzip-export       HAR 1.2 import and export, cURL generation
   proxyzip-sysproxy     Operating-system proxy settings

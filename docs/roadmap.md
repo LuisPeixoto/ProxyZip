@@ -10,15 +10,12 @@ system proxy and certificate install on macOS, Windows and Linux · gzip, deflat
 desktop app with list, inspector, filters, JSON tree, hex view and image/HTML preview · copy as cURL · repeat ·
 HAR import and export · notes and pins · command-line tool.
 
-## Phase 2: Debugging tools
+## ✅ Phase 2: Debugging tools
 
-- [ ] **Breakpoints:** pause a request or response, edit it, then continue or abort
-- [ ] **Compose:** build or edit and send requests, with cURL import
-- [ ] **Map Local** (file or directory) and **Map Remote** (rewrite host, path and port)
-- [ ] **Block and allow lists**, **DNS overrides**, **network throttling** presets
-- [ ] **Upstream proxy** (HTTP and SOCKS, with authentication) and **reverse proxy** mode
-- [ ] **SOCKS5** listener and PAC file serving
-- [ ] Rewrite rules for headers, status and bodies
+Breakpoints for requests and responses · Compose with cURL import and Edit & repeat · Map Local (file or folder) ·
+Map Remote · Block lists · Rewrite rules (headers, query, status, body) · Throttling presets · DNS overrides ·
+Upstream proxy (HTTP and SOCKS5) · Reverse proxy · SOCKS5 listener · PAC file · Record-only filter. See
+[Tools](tools.md).
 
 ## Phase 3: Analysis
 

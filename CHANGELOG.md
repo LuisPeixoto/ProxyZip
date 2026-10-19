@@ -6,6 +6,31 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0]
+
+Debugging tools.
+
+### Added
+
+- **Breakpoints** for requests and responses: pause matching traffic, edit method, URL, headers, status and body, then
+  continue or abort. The editor opens automatically and the toolbar shows how many requests are waiting.
+- **Compose**: build a request by hand, import a cURL command, or **Edit & repeat** a captured request.
+- **Map Local** (file or folder), **Map Remote**, **Block** (status or dropped connection) and **Rewrite** rules for
+  headers, query parameters, status codes and body text (decompressed, with regular expressions).
+- **Throttling** with Edge, 3G, LTE and poor Wi-Fi presets or custom latency and bandwidth.
+- **DNS overrides**, **upstream proxy** (HTTP with CONNECT and SOCKS5, with authentication and a bypass list),
+  **reverse proxy** listeners, a **SOCKS5 listener** and a **PAC file** at `/proxy.pac`.
+- **Record only** filter.
+- A **Tools** panel in the desktop app, context-menu shortcuts (set breakpoint, Map Local, Map Remote, Block, Edit &
+  repeat), and tags on requests that show which rules touched them.
+- `proxyzip start` options `--rules`, `--socks-port`, `--upstream-proxy`, `--reverse` and `--throttle`.
+- Rules are stored in `rules.json` and apply to new requests immediately.
+
+### Changed
+
+- Requests dropped by a block rule or aborted at a breakpoint close the client connection.
+- Raw tunnels honour DNS overrides and the upstream proxy.
+
 ## [0.1.0]
 
 First public release.
@@ -26,5 +51,6 @@ First public release.
 - `proxyzip` command-line tool.
 - Continuous integration for Linux, macOS and Windows.
 
-[Unreleased]: https://github.com/LuisPeixoto/ProxyZip/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/LuisPeixoto/ProxyZip/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/LuisPeixoto/ProxyZip/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/LuisPeixoto/ProxyZip/releases/tag/v0.1.0
