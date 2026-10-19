@@ -177,6 +177,15 @@ pub enum BreakpointPhase {
     Response,
 }
 
+/// One line printed by a script with `console.log` and friends.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LogLine {
+    /// `log`, `warn` or `error`.
+    pub level: String,
+    pub message: String,
+    pub timestamp: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Flow {
     pub id: FlowId,
@@ -196,6 +205,12 @@ pub struct Flow {
     /// `breakpoint`, `edited`, `throttle`.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Short description of a GraphQL operation, such as `query GetUser`.
+    #[serde(default)]
+    pub graphql: Option<String>,
+    /// Output of scripts that ran on this flow.
+    #[serde(default)]
+    pub logs: Vec<LogLine>,
 }
 
 impl Flow {
@@ -215,6 +230,8 @@ impl Flow {
             comment: None,
             pinned: false,
             tags: Vec::new(),
+            graphql: None,
+            logs: Vec::new(),
         }
     }
 
@@ -258,6 +275,8 @@ impl Flow {
             pinned: self.pinned,
             has_comment: self.comment.is_some(),
             tags: self.tags.clone(),
+            graphql: self.graphql.clone(),
+            has_logs: !self.logs.is_empty(),
         }
     }
 }
@@ -286,6 +305,8 @@ pub struct FlowSummary {
     pub pinned: bool,
     pub has_comment: bool,
     pub tags: Vec<String>,
+    pub graphql: Option<String>,
+    pub has_logs: bool,
 }
 
 pub fn now_ms() -> i64 {
