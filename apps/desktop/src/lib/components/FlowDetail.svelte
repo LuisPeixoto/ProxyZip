@@ -1,7 +1,8 @@
 <script lang="ts">
   import { app } from "../stores/app.svelte";
   import { api, formatBytes, formatDuration, type FlowDetail, type Headers } from "../api";
-  import { copy, copyCurl, repeat } from "../actions";
+  import { copy, copyCurl, editAndRepeat, repeat } from "../actions";
+  import { tagClass } from "./Badges";
   import { methodClass, statusClass } from "./Badges";
   import BodyViewer from "./BodyViewer.svelte";
   import CodeView from "./CodeView.svelte";
@@ -126,10 +127,12 @@
       {/if}
       <span class="mono text-[11px] text-muted">{formatDuration(s.duration_ms)}</span>
       <span class="mono text-[11px] text-muted">{formatBytes(s.response_size)}</span>
+      {#each s.tags as tag (tag)}<span class="rounded px-1.5 py-px text-[10.5px] font-medium {tagClass(tag)}">{tag}</span>{/each}
       <span class="mono rounded border border-line px-1.5 py-px text-[10.5px] text-muted">{s.http_version}</span>
       <div class="ml-1 flex items-center gap-0.5">
         <button title="Copy URL" onclick={() => copy(s.url, "URL copied")} class="grid size-7 place-items-center rounded-md text-muted hover:bg-hover hover:text-fg"><Icon name="copy" size={14} /></button>
         <button title="Copy as cURL" onclick={() => copyCurl(s.id)} class="grid size-7 place-items-center rounded-md text-muted hover:bg-hover hover:text-fg"><Icon name="terminal" size={14} /></button>
+        <button title="Edit & repeat…" disabled={s.method === "CONNECT"} onclick={() => editAndRepeat(s)} class="grid size-7 place-items-center rounded-md text-muted hover:bg-hover hover:text-fg disabled:opacity-30"><Icon name="edit" size={14} /></button>
         <button title="Repeat (⌘R)" disabled={s.method === "CONNECT"} onclick={() => repeat(s.id)} class="grid size-7 place-items-center rounded-md text-muted hover:bg-hover hover:text-fg disabled:opacity-30"><Icon name="repeat" size={14} /></button>
       </div>
     </div>
