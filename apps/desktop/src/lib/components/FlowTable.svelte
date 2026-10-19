@@ -1,8 +1,22 @@
 <script lang="ts">
   import { app, type SortKey } from "../stores/app.svelte";
   import { formatBytes, formatDuration, formatTime, type FlowSummary } from "../api";
-  import { methodClass, statusClass, typeLabel } from "./Badges";
-  import { copy, copyCurl, copyResponseBody, excludeHost, exportHar, remove, repeat, togglePin } from "../actions";
+  import { methodClass, statusClass, tagClass, typeLabel } from "./Badges";
+  import {
+    addBreakpointFor,
+    blockHost,
+    copy,
+    copyCurl,
+    copyResponseBody,
+    editAndRepeat,
+    excludeHost,
+    exportHar,
+    mapLocalFor,
+    mapRemoteFor,
+    remove,
+    repeat,
+    togglePin,
+  } from "../actions";
   import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
   import Icon from "./Icon.svelte";
   import Onboarding from "./Onboarding.svelte";
@@ -90,10 +104,16 @@
         { label: "Copy response body", icon: "code", disabled: many || f.response_size == null, action: () => copyResponseBody(f.id) },
         { separator: true },
         { label: "Repeat request", icon: "repeat", shortcut: "⌘R", disabled: many || f.method === "CONNECT", action: () => repeat(f.id) },
+        { label: "Edit & repeat…", icon: "edit", disabled: many || f.method === "CONNECT", action: () => editAndRepeat(f) },
         { label: f.pinned ? "Unpin" : "Pin", icon: "pin", action: () => togglePin(ids) },
         { label: many ? `Export ${ids.length} flows as HAR…` : "Export as HAR…", icon: "download", action: () => exportHar(ids) },
         { separator: true },
         { label: `Only show ${f.host}`, icon: "filter", action: () => (app.sidebar = { kind: "host", value: f.host }) },
+        { separator: true },
+        { label: "Set breakpoint", icon: "pause", disabled: many || f.method === "CONNECT", action: () => addBreakpointFor(f) },
+        { label: "Map Local…", icon: "file", disabled: many || f.method === "CONNECT", action: () => mapLocalFor(f) },
+        { label: "Map Remote…", icon: "shuffle", disabled: many || f.method === "CONNECT", action: () => mapRemoteFor(f) },
+        { label: `Block ${f.host}`, icon: "ban", disabled: many, action: () => blockHost(f) },
         { label: `Don't decrypt ${f.host}`, icon: "unlock", action: () => excludeHost(f.host, true) },
         { separator: true },
         { label: many ? `Delete ${ids.length} flows` : "Delete", icon: "trash", shortcut: "⌘⌫", danger: true, action: () => remove(ids) },
@@ -115,6 +135,7 @@
 
   function statusText(f: FlowSummary): string {
     if (f.state === "failed") return "ERR";
+    if (f.state === "paused") return "PAUSED";
     if (f.state === "tunnel") return "TUN";
     if (f.status != null) return String(f.status);
     return "···";
@@ -175,7 +196,7 @@
               {#if f.pinned}<Icon name="pin" size={11} class="inline text-accent" />{:else}{f.id}{/if}
             </span>
             <span class="px-2">
-              <span class="mono inline-flex h-[18px] min-w-[38px] items-center justify-center rounded-[5px] px-1.5 text-[11px] font-semibold {statusClass(f.status, failed)}">
+              <span class="mono inline-flex h-[18px] min-w-[38px] items-center justify-center rounded-[5px] px-1.5 text-[11px] font-semibold {f.state === 'paused' ? 'bg-warn/15 text-warn' : statusClass(f.status, failed)}">
                 {statusText(f)}
               </span>
             </span>
@@ -188,6 +209,7 @@
             </span>
             <span class="mono truncate px-2.5 text-[11.5px] {failed ? '' : 'text-fg/80'}" title={failed ? f.error : f.url}>
               {#if failed && f.error}<span class="opacity-90">{f.path || f.host} — {f.error}</span>{:else}{f.path}{/if}
+              {#each f.tags as tag (tag)}<span class="ml-1.5 rounded px-1 text-[10px] font-medium {tagClass(tag)}">{tag}</span>{/each}
               {#if f.ws_message_count}<span class="ml-1.5 rounded bg-accent-soft px-1 text-[10px] text-accent">{f.ws_message_count} msgs</span>{/if}
               {#if f.has_comment}<Icon name="comment" size={11} class="ml-1 inline text-warn" />{/if}
             </span>
