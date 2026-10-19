@@ -21,8 +21,8 @@ use proxyzip_core::{FlowState, FlowStore, Scheme, WsDirection};
 use proxyzip_proxy::{BreakpointHub, Decision, ProxyConfig, ProxyServer, ProxySettings, RequestEdit, ResponseEdit};
 use proxyzip_rules::{
     BlockAction, BlockRule, BreakpointRule, DnsRule, LocalSource, MapLocalRule, MapRemoteRule, Matcher, Phase,
-    RecordOnly, ReverseRule, RewriteOp, RewriteRule, RuleSet, SocksListener, Throttle, ThrottleProfile, UpstreamKind,
-    UpstreamProxy,
+    RecordOnly, ReverseRule, RewriteOp, RewriteRule, RuleSet, ScriptRule, SocksListener, Throttle, ThrottleProfile,
+    UpstreamKind, UpstreamProxy,
 };
 use proxyzip_tls::CertificateAuthority;
 use rcgen::{BasicConstraints, CertificateParams, IsCa, Issuer, KeyPair};
@@ -898,4 +898,209 @@ async fn serves_a_pac_file_pointing_back_at_the_proxy() {
     let via_proxy = plain_client(&h).get("http://proxyzip.cert/proxy.pac").send().await.unwrap().text().await.unwrap();
     assert!(via_proxy.contains(&format!("PROXY 127.0.0.1:{}", h.proxy.port())), "{via_proxy}");
     assert!(h.store.is_empty(), "local pages are not recorded");
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Scripts, GraphQL labels and live event streams
+// ---------------------------------------------------------------------------------------------------------------------
+
+fn script_rules(pattern: String, source: &str) -> RuleSet {
+    let mut rules = RuleSet::default();
+    rules.scripts.push(ScriptRule {
+        name: "test script".into(),
+        matcher: Matcher::new(pattern),
+        source: source.into(),
+        ..Default::default()
+    });
+    rules
+}
+
+#[tokio::test]
+async fn request_scripts_edit_the_request_before_it_is_sent() {
+    let up = spawn_http_upstream().await;
+    let h = start_proxy(None).await;
+    set_rules(
+        &h,
+        script_rules(
+            format!("{up}/*"),
+            r#"function onRequest(ctx, request) {
+                 request.headers["x-from-script"] = "yes";
+                 request.url = request.url.replace("/echo", "/headers");
+               }"#,
+        ),
+    );
+    let resp = plain_client(&h).get(format!("http://{up}/echo")).send().await.unwrap();
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("x-from-script: yes"), "the script's header reached the server:\n{body}");
+    let flows = wait_completed(&h.store, 1).await;
+    assert!(flows[0].tags.contains(&"script".to_string()));
+    assert_eq!(flows[0].request.path, "/headers", "the list shows what was really requested");
+    assert_eq!(flows[0].request.headers.get("x-from-script"), Some("yes"));
+}
+
+#[tokio::test]
+async fn request_scripts_rewrite_json_bodies() {
+    let up = spawn_http_upstream().await;
+    let h = start_proxy(None).await;
+    set_rules(
+        &h,
+        script_rules(
+            format!("{up}/echo"),
+            r#"function onRequest(ctx, request) {
+                 const data = JSON.parse(request.body);
+                 data.token = $.sha256(data.user).slice(0, 8);
+                 request.body = JSON.stringify(data);
+                 console.log("signed", data.user);
+               }"#,
+        ),
+    );
+    let sent = plain_client(&h)
+        .post(format!("http://{up}/echo"))
+        .header("content-type", "application/json")
+        .body(r#"{"user":"abc"}"#)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(sent.text().await.unwrap(), r#"{"user":"abc","token":"ba7816bf"}"#);
+    let flows = wait_completed(&h.store, 1).await;
+    assert!(flows[0].logs.iter().any(|l| l.message == "signed abc"), "{:?}", flows[0].logs);
+}
+
+#[tokio::test]
+async fn response_scripts_rewrite_compressed_json() {
+    let up = spawn_http_upstream().await;
+    let h = start_proxy(None).await;
+    set_rules(
+        &h,
+        script_rules(
+            format!("{up}/gzip"),
+            r#"function onResponse(ctx, request, response) {
+                 const data = JSON.parse(response.body);
+                 data.ok = false;
+                 data.via = "script";
+                 response.body = JSON.stringify(data);
+                 response.status = 202;
+               }"#,
+        ),
+    );
+    let resp = plain_client(&h).get(format!("http://{up}/gzip")).send().await.unwrap();
+    assert_eq!(resp.status(), 202);
+    assert!(resp.headers().get("content-encoding").is_none());
+    assert_eq!(resp.text().await.unwrap(), r#"{"ok":false,"via":"script"}"#);
+    let flows = wait_completed(&h.store, 1).await;
+    assert_eq!(&flows[0].response.as_ref().unwrap().body[..], br#"{"ok":false,"via":"script"}"#);
+}
+
+#[tokio::test]
+async fn a_script_can_block_a_request() {
+    let up = spawn_http_upstream().await;
+    let h = start_proxy(None).await;
+    set_rules(&h, script_rules(format!("{up}/hello"), "function onRequest() { return null; }"));
+    let resp = plain_client(&h).get(format!("http://{up}/hello")).send().await.unwrap();
+    assert_eq!(resp.status(), 403);
+    assert_eq!(resp.headers()["x-proxyzip-rule"], "script");
+    let flows = wait_completed(&h.store, 1).await;
+    assert!(flows[0].tags.contains(&"blocked".to_string()));
+}
+
+#[tokio::test]
+async fn a_broken_script_never_breaks_the_traffic() {
+    let up = spawn_http_upstream().await;
+    let h = start_proxy(None).await;
+    set_rules(&h, script_rules(format!("{up}/hello"), "function onRequest( {"));
+    let resp = plain_client(&h).get(format!("http://{up}/hello")).send().await.unwrap();
+    assert_eq!(resp.text().await.unwrap(), "hi there", "the request went through untouched");
+    let flows = wait_completed(&h.store, 1).await;
+    assert!(flows[0].tags.contains(&"script-error".to_string()));
+    let error = flows[0].logs.iter().find(|l| l.level == "error").expect("the error is on the flow");
+    assert!(error.message.contains("test script"), "{}", error.message);
+}
+
+#[tokio::test]
+async fn a_script_stuck_in_a_loop_is_stopped_and_traffic_continues() {
+    let up = spawn_http_upstream().await;
+    let h = start_proxy(None).await;
+    set_rules(&h, script_rules(format!("{up}/hello"), "function onRequest() { while (true) {} }"));
+    let started = std::time::Instant::now();
+    let resp = plain_client(&h).get(format!("http://{up}/hello")).send().await.unwrap();
+    assert_eq!(resp.text().await.unwrap(), "hi there");
+    assert!(started.elapsed() < Duration::from_secs(10), "stopped by the time limit, not by the test");
+    let flows = wait_completed(&h.store, 1).await;
+    assert!(flows[0].tags.contains(&"script-error".to_string()));
+    assert!(flows[0].logs.iter().any(|l| l.message.contains("stopped")));
+}
+
+#[tokio::test]
+async fn graphql_operations_are_labelled() {
+    let up = spawn_http_upstream().await;
+    let h = start_proxy(None).await;
+    let c = plain_client(&h);
+    c.post(format!("http://{up}/echo"))
+        .header("content-type", "application/json")
+        .body(r#"{"query":"query GetUser($id: ID!) { user(id: $id) { name } }","variables":{"id":"1"}}"#)
+        .send()
+        .await
+        .unwrap();
+    c.post(format!("http://{up}/echo"))
+        .header("content-type", "application/json")
+        .body(r#"{"hello":"world"}"#)
+        .send()
+        .await
+        .unwrap();
+    let flows = wait_completed(&h.store, 2).await;
+    assert_eq!(flows[0].graphql.as_deref(), Some("query GetUser"));
+    assert_eq!(flows[0].summary().graphql.as_deref(), Some("query GetUser"));
+    assert_eq!(flows[1].graphql, None);
+}
+
+/// An upstream that sends one event every 400 ms and then ends the stream.
+async fn spawn_sse_upstream(events: usize) -> SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            tokio::spawn(async move {
+                let mut request = vec![0u8; 4096];
+                let _ = socket.read(&mut request).await;
+                socket
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n",
+                    )
+                    .await
+                    .unwrap();
+                for i in 0..events {
+                    let event = format!("data: tick {i}\n\n");
+                    let chunk = format!("{:x}\r\n{event}\r\n", event.len());
+                    if socket.write_all(chunk.as_bytes()).await.is_err() {
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(400)).await;
+                }
+                let _ = socket.write_all(b"0\r\n\r\n").await;
+            });
+        }
+    });
+    addr
+}
+
+#[tokio::test]
+async fn event_streams_show_up_while_they_are_still_open() {
+    let up = spawn_sse_upstream(5).await;
+    let h = start_proxy(None).await;
+    let c = plain_client(&h);
+    let url = format!("http://{up}/events");
+    let reader = tokio::spawn(async move { c.get(url).send().await.unwrap().text().await.unwrap() });
+
+    // Roughly 1.2 s in, three of five events have been sent and the stream is still open.
+    tokio::time::sleep(Duration::from_millis(1300)).await;
+    let flow = h.store.all().remove(0);
+    assert_ne!(flow.state, FlowState::Completed, "the stream has not ended yet");
+    let partial = String::from_utf8_lossy(&flow.response.as_ref().unwrap().body).into_owned();
+    assert!(partial.contains("data: tick 0") && partial.contains("data: tick 1"), "partial body: {partial:?}");
+
+    let full = reader.await.unwrap();
+    assert!(full.contains("data: tick 4"));
+    let flows = wait_completed(&h.store, 1).await;
+    assert!(String::from_utf8_lossy(&flows[0].response.as_ref().unwrap().body).contains("data: tick 4"));
 }
