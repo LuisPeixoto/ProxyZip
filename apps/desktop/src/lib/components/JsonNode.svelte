@@ -1,10 +1,16 @@
 <script lang="ts">
   import Self from "./JsonNode.svelte";
 
-  let { name, value, depth = 0, last = true }: { name?: string | number; value: unknown; depth?: number; last?: boolean } = $props();
+  let {
+    name,
+    value,
+    depth = 0,
+    last = true,
+    expand = 2,
+  }: { name?: string | number; value: unknown; depth?: number; last?: boolean; expand?: number } = $props();
   const PAGE = 200;
   // svelte-ignore state_referenced_locally
-  let open = $state(depth < 2); // initial expansion only
+  let open = $state(depth < expand); // initial expansion only
   let limit = $state(PAGE);
 
   const isArr = $derived(Array.isArray(value));
@@ -26,7 +32,7 @@
     </button>
     {#if open}
       {#each entries.slice(0, limit) as [k, v], i (k)}
-        <Self name={k} value={v} depth={depth + 1} last={i === entries.length - 1} />
+        <Self name={k} value={v} depth={depth + 1} {expand} last={i === entries.length - 1} />
       {/each}
       {#if entries.length > limit}
         <button class="ml-4 text-[11px] text-accent hover:underline" onclick={() => (limit += PAGE * 5)}>
