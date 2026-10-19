@@ -1,0 +1,16 @@
+[package]
+name = "proxyzip-core"
+description = "Core data model, flow store and event bus for ProxyZip"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+bytes = { workspace = true, features = ["serde"] }
+chrono.workspace = true
+dirs.workspace = true
+parking_lot.workspace = true
+serde.workspace = true
+tokio = { workspace = true, features = ["sync"] }
