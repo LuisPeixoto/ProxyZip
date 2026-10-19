@@ -26,6 +26,8 @@ export interface FlowSummary {
   pinned: boolean;
   has_comment: boolean;
   tags: string[];
+  graphql: string | null;
+  has_logs: boolean;
 }
 
 export type Headers = [string, string][];
@@ -33,6 +35,12 @@ export type Headers = [string, string][];
 export type BodyKind =
   | "empty" | "json" | "xml" | "html" | "javascript" | "css" | "form"
   | "multipart" | "text" | "image" | "protobuf" | "binary";
+
+export interface Structured {
+  format: "protobuf" | "grpc" | "msgpack" | "sse" | "graphql";
+  json: unknown;
+  note: string | null;
+}
 
 export interface BodyView {
   kind: BodyKind;
@@ -45,6 +53,7 @@ export interface BodyView {
   pretty: string | null;
   base64: string | null;
   truncated: boolean;
+  structured: Structured | null;
 }
 
 export interface Timing {
@@ -85,6 +94,13 @@ export interface FlowDetail {
   tls: TlsInfo | null;
   comment: string | null;
   ws_messages: WsView[];
+  logs: LogLine[];
+}
+
+export interface LogLine {
+  level: "log" | "warn" | "error";
+  message: string;
+  timestamp: number;
 }
 
 export type FlowEvent =
@@ -118,6 +134,7 @@ export interface Preferences {
   max_body_capture_mb: number;
   insecure_upstream: boolean;
   max_flows: number;
+  restore_last_session: boolean;
 }
 
 // ---- Rules -----------------------------------------------------------------------------------------------------------
@@ -210,6 +227,7 @@ export interface RuleSet {
     map_remote: boolean;
     rewrite: boolean;
     breakpoints: boolean;
+    scripts: boolean;
     dns: boolean;
     reverse: boolean;
   };
@@ -219,11 +237,55 @@ export interface RuleSet {
   map_remote: MapRemoteRule[];
   rewrite: RewriteRule[];
   breakpoints: BreakpointRule[];
+  scripts: ScriptRule[];
+  proto_mappings: ProtoMapping[];
   throttle: { enabled: boolean; profile: ThrottleProfile; matchers: Matcher[] };
   dns: DnsRule[];
   upstream: UpstreamProxy;
   reverse: ReverseRule[];
   socks: { enabled: boolean; port: number };
+}
+
+export interface ScriptRule {
+  name: string;
+  enabled: boolean;
+  matcher: Matcher;
+  source: string;
+  on_request: boolean;
+  on_response: boolean;
+}
+export interface ProtoMapping {
+  name: string;
+  enabled: boolean;
+  matcher: Matcher;
+  request_type: string | null;
+  response_type: string | null;
+}
+export interface ProtoInfo {
+  files: string[];
+  messages: string[];
+  methods: string[];
+}
+export interface LanguageInfo {
+  id: string;
+  label: string;
+  syntax: string;
+}
+export interface RecentSession {
+  path: string;
+  name: string;
+  saved_at: number;
+  flows: number;
+}
+export interface ScriptPhaseResult {
+  outcome: "unchanged" | "changed" | "block" | "error";
+  error?: string;
+  value: unknown;
+}
+export interface ScriptTestResult {
+  request: ScriptPhaseResult;
+  response: ScriptPhaseResult | null;
+  logs: LogLine[];
 }
 
 export interface ComposeInput {
@@ -268,6 +330,19 @@ export const api = {
   throttlePresets: () => invoke<ThrottleProfile[]>("throttle_presets"),
   resolveBreakpoint: (id: FlowId, decision: Decision) => invoke<boolean>("resolve_breakpoint", { id, decision }),
   releaseBreakpoints: () => invoke<void>("release_breakpoints"),
+  listProtos: () => invoke<ProtoInfo>("list_protos"),
+  importProto: (path: string) => invoke<ProtoInfo>("import_proto", { path }),
+  removeProto: (name: string) => invoke<ProtoInfo>("remove_proto", { name }),
+  codeLanguages: () => invoke<LanguageInfo[]>("code_languages"),
+  generateCode: (id: FlowId, language: string) => invoke<string>("generate_code", { id, language }),
+  queryBody: (id: FlowId, part: "request" | "response", expr: string) => invoke<unknown[]>("query_body", { id, part, expr }),
+  saveSession: (path: string, ids: FlowId[] | null) => invoke<number>("save_session", { path, ids }),
+  openSession: (path: string, append: boolean) => invoke<number>("open_session", { path, append }),
+  recentSessions: () => invoke<RecentSession[]>("recent_sessions"),
+  forgetRecentSession: (path: string) => invoke<void>("forget_recent_session", { path }),
+  exportCsv: (path: string, ids: FlowId[] | null) => invoke<number>("export_csv", { path, ids }),
+  exportPostman: (path: string, ids: FlowId[] | null) => invoke<number>("export_postman", { path, ids }),
+  testScript: (source: string, id: FlowId) => invoke<ScriptTestResult>("test_script", { source, id }),
   sslToggleHost: (host: string, exclude: boolean) => invoke<void>("ssl_proxying_toggle_host", { host, exclude }),
 };
 
@@ -317,13 +392,15 @@ export function base64ToText(b64: string): string | null {
 
 export function emptyRules(): RuleSet {
   return {
-    tools: { block: true, map_local: true, map_remote: true, rewrite: true, breakpoints: true, dns: true, reverse: true },
+    tools: { block: true, map_local: true, map_remote: true, rewrite: true, breakpoints: true, scripts: true, dns: true, reverse: true },
     block: [],
     record_only: { enabled: false, matchers: [] },
     map_local: [],
     map_remote: [],
     rewrite: [],
     breakpoints: [],
+    scripts: [],
+    proto_mappings: [],
     throttle: { enabled: false, profile: { name: "Custom", latency_ms: 0, download_kbps: 0, upload_kbps: 0 }, matchers: [] },
     dns: [],
     upstream: { enabled: false, kind: "http", host: "", port: 8080, username: null, password: null, bypass: [] },

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { app } from "../stores/app.svelte";
-  import { api, formatBytes, formatDuration, type FlowDetail, type Headers } from "../api";
+  import { api, formatBytes, formatDuration, formatTime, type FlowDetail, type Headers } from "../api";
   import { copy, copyCurl, editAndRepeat, repeat } from "../actions";
   import { tagClass } from "./Badges";
   import { methodClass, statusClass } from "./Badges";
@@ -132,6 +132,7 @@
       <div class="ml-1 flex items-center gap-0.5">
         <button title="Copy URL" onclick={() => copy(s.url, "URL copied")} class="grid size-7 place-items-center rounded-md text-muted hover:bg-hover hover:text-fg"><Icon name="copy" size={14} /></button>
         <button title="Copy as cURL" onclick={() => copyCurl(s.id)} class="grid size-7 place-items-center rounded-md text-muted hover:bg-hover hover:text-fg"><Icon name="terminal" size={14} /></button>
+        <button title="Generate code…" disabled={s.method === "CONNECT"} onclick={() => (app.codeFor = s.id)} class="grid size-7 place-items-center rounded-md text-muted hover:bg-hover hover:text-fg disabled:opacity-30"><Icon name="code" size={14} /></button>
         <button title="Edit & repeat…" disabled={s.method === "CONNECT"} onclick={() => editAndRepeat(s)} class="grid size-7 place-items-center rounded-md text-muted hover:bg-hover hover:text-fg disabled:opacity-30"><Icon name="edit" size={14} /></button>
         <button title="Repeat (⌘R)" disabled={s.method === "CONNECT"} onclick={() => repeat(s.id)} class="grid size-7 place-items-center rounded-md text-muted hover:bg-hover hover:text-fg disabled:opacity-30"><Icon name="repeat" size={14} /></button>
       </div>
@@ -165,7 +166,7 @@
           {:else if reqTab === "cookies"}
             <KeyValueTable rows={d.request.cookies} empty="No cookies sent" />
           {:else if reqTab === "body"}
-            <BodyViewer body={d.request.body} />
+            <BodyViewer body={d.request.body} flowId={s.id} part="request" />
           {:else}
             <CodeView text={rawRequest(d)} wrap />
           {/if}
@@ -184,6 +185,7 @@
             { id: "cookies", label: "Set-Cookie", badge: count(d.response?.set_cookies ?? []) },
             { id: "raw", label: "Raw" },
             { id: "timing", label: "Timing" },
+            ...(d.logs.length ? [{ id: "console", label: "Console", badge: String(d.logs.length) }] : []),
             { id: "notes", label: "Notes", badge: d.comment ? "•" : "" },
           ],
           resTab,
@@ -201,6 +203,15 @@
               ></textarea>
               <button onclick={saveComment} class="self-end rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:opacity-90">Save note</button>
             </div>
+          {:else if resTab === "console"}
+            <div class="selectable mono divide-y divide-line/60 text-[12px]">
+              {#each d.logs as line, n (n)}
+                <div class="flex gap-3 px-3 py-1.5 {line.level === 'error' ? 'bg-err/8 text-err' : line.level === 'warn' ? 'bg-warn/8 text-warn' : ''}">
+                  <span class="shrink-0 text-faint">{formatTime(line.timestamp)}</span>
+                  <span class="min-w-0 whitespace-pre-wrap break-words">{line.message}</span>
+                </div>
+              {/each}
+            </div>
           {:else if resTab === "messages"}
             <WsMessages messages={d.ws_messages} />
           {:else if !d.response}
@@ -210,7 +221,7 @@
           {:else if resTab === "headers"}
             <KeyValueTable rows={d.response.headers} empty="No headers" />
           {:else if resTab === "body"}
-            <BodyViewer body={d.response.body} />
+            <BodyViewer body={d.response.body} flowId={s.id} part="response" />
           {:else if resTab === "cookies"}
             <KeyValueTable rows={cookiePairs(d.response.set_cookies)} empty="No cookies set" />
           {:else}

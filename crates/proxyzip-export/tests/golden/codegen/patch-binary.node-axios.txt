@@ -1,0 +1,15 @@
+const axios = require("axios");
+
+const response = await axios.request({
+  method: "patch",
+  url: "https://api.example.com/v1/items?id=2",
+  headers: {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer abc",
+    "X-Note": "it's \"quoted\" $5 #{x}",
+  },
+  data: Buffer.from("/wAB", "base64"),
+  transformResponse: (data) => data,
+  validateStatus: () => true,
+});
+console.log(response.status, response.data);

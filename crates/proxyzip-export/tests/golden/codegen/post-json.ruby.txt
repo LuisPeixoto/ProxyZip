@@ -1,0 +1,14 @@
+require 'net/http'
+require 'uri'
+
+uri = URI('https://api.example.com/v1/items?id=2')
+http = Net::HTTP.new(uri.host, uri.port)
+http.use_ssl = uri.scheme == 'https'
+request = Net::HTTP::Post.new(uri)
+request['Content-Type'] = 'application/json'
+request['Authorization'] = 'Bearer abc'
+request['X-Note'] = 'it\'s "quoted" $5 #{x}'
+request.body = '{"name":"ada","note":"line1\\nline2 \\"q\\" $x"}'
+
+response = http.request(request)
+puts "#{response.code} #{response.body}"

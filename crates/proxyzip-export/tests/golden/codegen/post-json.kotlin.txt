@@ -1,0 +1,10 @@
+val client = OkHttpClient()
+val request = Request.Builder()
+    .url("https://api.example.com/v1/items?id=2")
+    .method("POST", "{\"name\":\"ada\",\"note\":\"line1\\nline2 \\\"q\\\" \$x\"}".toRequestBody("application/json".toMediaType()))
+    .addHeader("Authorization", "Bearer abc")
+    .addHeader("X-Note", "it's \"quoted\" \$5 #{x}")
+    .build()
+client.newCall(request).execute().use { response ->
+    println("${response.code} ${response.body?.string()}")
+}

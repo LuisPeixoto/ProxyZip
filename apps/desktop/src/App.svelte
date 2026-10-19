@@ -2,7 +2,10 @@
   import { onMount } from "svelte";
   import { app } from "./lib/stores/app.svelte";
   import { api } from "./lib/api";
-  import { remove, repeat } from "./lib/actions";
+  import { compare, openSession, remove, repeat, saveSession } from "./lib/actions";
+  import CodeModal from "./lib/components/CodeModal.svelte";
+  import DiffModal from "./lib/components/DiffModal.svelte";
+  import OpenSessionDialog from "./lib/components/OpenSessionDialog.svelte";
   import BreakpointEditor from "./lib/components/BreakpointEditor.svelte";
   import Composer from "./lib/components/Composer.svelte";
   import ToolsPanel from "./lib/components/ToolsPanel.svelte";
@@ -41,6 +44,15 @@
     } else if (mod && e.key.toLowerCase() === "r") {
       e.preventDefault(); // never reload the webview
       if (app.focused != null) repeat(app.focused);
+    } else if (mod && e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      saveSession(app.selected.size > 1 ? [...app.selected] : null);
+    } else if (mod && e.key.toLowerCase() === "o") {
+      e.preventDefault();
+      openSession();
+    } else if (mod && e.key.toLowerCase() === "d") {
+      e.preventDefault();
+      compare([...app.selected]);
     } else if (mod && e.key.toLowerCase() === "t") {
       e.preventDefault();
       app.openTools();
@@ -93,5 +105,8 @@
 {#if app.settingsOpen}<SettingsModal />{/if}
 {#if app.toolsOpen}<ToolsPanel />{/if}
 {#if app.composer}<Composer />{/if}
+{#if app.codeFor != null}<CodeModal />{/if}
+{#if app.diff}<DiffModal />{/if}
+{#if app.pendingOpen}<OpenSessionDialog />{/if}
 <BreakpointEditor />
 <Toasts />

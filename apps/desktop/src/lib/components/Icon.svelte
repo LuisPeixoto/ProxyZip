@@ -51,6 +51,12 @@
     gauge: "M12 14l4-4M3.3 17a10 10 0 1 1 17.4 0",
     network: "M12 3v6M5 21v-6a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v6M9 3h6v6H9zM2 21h6v0M16 21h6",
     eye: "M2 12s4-8 10-8 10 8 10 8-4 8-10 8-10-8-10-8zM12 12m-3 0a3 3 0 1 0 6 0a3 3 0 1 0 -6 0",
+    save: "M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2zM17 21v-8H7v8M7 3v5h8",
+    columns: "M12 3v18M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
+    flask: "M9 3h6M10 3v6L4.5 19a1.5 1.5 0 0 0 1.3 2h12.4a1.5 1.5 0 0 0 1.3-2L14 9V3",
+    history: "M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2",
+    book: "M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20V2H6.5A2.5 2.5 0 0 0 4 4.5z",
+    folderOpen: "M6 14l1.5-2.5A2 2 0 0 1 9.2 10.5H21l-2.4 7a2 2 0 0 1-1.9 1.5H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v2.5",
     file: "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6",
   };
   let { name, size = 16, class: cls = "", stroke = 1.8 }: { name: string; size?: number; class?: string; stroke?: number } = $props();

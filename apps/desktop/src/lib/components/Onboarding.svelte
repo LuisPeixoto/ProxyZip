@@ -1,7 +1,7 @@
 <script lang="ts">
   import { app } from "../stores/app.svelte";
   import { api } from "../api";
-  import { copy } from "../actions";
+  import { copy, requestOpen } from "../actions";
   import Icon from "./Icon.svelte";
 
   const st = $derived(app.status);
@@ -75,6 +75,22 @@
         <button onclick={terminal} class="rounded-lg border border-line px-3 py-1.5 text-[12px] font-medium hover:bg-hover">Copy shell setup</button>
       </div>
     </div>
+
+    {#if app.recent.length}
+      <div class="mt-3 w-full rounded-2xl border border-line bg-panel-2 p-5">
+        <div class="mb-3 flex items-center gap-2 text-[13px] font-semibold"><Icon name="history" size={15} class="text-accent" /> Recent sessions</div>
+        <div class="grid gap-1">
+          {#each app.recent.slice(0, 5) as session (session.path)}
+            <button onclick={() => requestOpen(session.path)} class="flex items-center gap-3 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] hover:bg-hover" title={session.path}>
+              <Icon name="file" size={14} class="shrink-0 text-muted" />
+              <span class="min-w-0 flex-1 truncate font-medium">{session.name}</span>
+              <span class="mono shrink-0 text-[11px] text-faint">{session.flows.toLocaleString()} requests</span>
+              <span class="shrink-0 text-[11px] text-faint">{new Date(session.saved_at).toLocaleDateString()}</span>
+            </button>
+          {/each}
+        </div>
+      </div>
+    {/if}
 
     <div class="mt-3 w-full rounded-2xl border border-line bg-panel-2 p-5">
       <div class="flex items-start gap-3">

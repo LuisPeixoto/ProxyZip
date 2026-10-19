@@ -136,3 +136,66 @@ export async function editAndRepeat(f: FlowSummary) {
     body_base64: detail.request.body.base64 ?? "",
   });
 }
+
+// ---- Sessions and exports ---------------------------------------------------------------------------------------------
+
+const stamp = () => new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+
+export async function saveSession(ids: FlowId[] | null = null) {
+  const path = await save({
+    defaultPath: `proxyzip-${stamp()}.pzsession`,
+    filters: [{ name: "ProxyZip session", extensions: ["pzsession"] }],
+  });
+  if (!path) return;
+  const n = await app.attempt(() => api.saveSession(path, ids));
+  if (n == null) return;
+  app.markSaved();
+  app.toast(`Saved ${n} request${n === 1 ? "" : "s"}`, "ok");
+  await app.refreshRecent();
+}
+
+/** Choose a session file. With traffic already on screen the user is asked whether to replace it or add to it. */
+export async function openSession() {
+  const path = await open({ multiple: false, filters: [{ name: "ProxyZip session", extensions: ["pzsession"] }] });
+  if (!path || Array.isArray(path)) return;
+  await requestOpen(path);
+}
+
+export async function requestOpen(path: string) {
+  if (app.flows.length === 0) await finishOpen(path, false);
+  else app.pendingOpen = path;
+}
+
+export async function finishOpen(path: string, append: boolean) {
+  app.pendingOpen = null;
+  const n = await app.attempt(() => api.openSession(path, append));
+  if (n == null) {
+    await app.attempt(() => api.forgetRecentSession(path));
+  } else {
+    app.markSaved();
+    app.toast(`Opened ${n} request${n === 1 ? "" : "s"}`, "ok");
+  }
+  await app.refreshRecent();
+}
+
+export async function exportCsv(ids: FlowId[] | null) {
+  const path = await save({ defaultPath: `proxyzip-${stamp()}.csv`, filters: [{ name: "CSV", extensions: ["csv"] }] });
+  if (!path) return;
+  const n = await app.attempt(() => api.exportCsv(path, ids));
+  if (n != null) app.toast(`Exported ${n} request${n === 1 ? "" : "s"} to CSV`, "ok");
+}
+
+export async function exportPostman(ids: FlowId[] | null) {
+  const path = await save({ defaultPath: `proxyzip-${stamp()}.postman_collection.json`, filters: [{ name: "Postman collection", extensions: ["json"] }] });
+  if (!path) return;
+  const n = await app.attempt(() => api.exportPostman(path, ids));
+  if (n != null) app.toast(`Exported ${n} request${n === 1 ? "" : "s"} as a Postman collection`, "ok");
+}
+
+export function compare(ids: FlowId[]) {
+  if (ids.length !== 2) {
+    app.toast("Select exactly two requests to compare them", "info");
+    return;
+  }
+  app.diff = [Math.min(...ids), Math.max(...ids)];
+}

@@ -1,0 +1,9 @@
+const response = await fetch("https://api.example.com/v1/items?id=2", {
+  method: "GET",
+  headers: {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer abc",
+    "X-Note": "it's \"quoted\" $5 #{x}",
+  },
+});
+console.log(response.status, await response.text());

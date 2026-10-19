@@ -3,16 +3,17 @@ use std::sync::Arc;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
-use proxyzip_codec::BodyView;
-use proxyzip_core::{FlowId, FlowSummary, Headers, Timing, TlsInfo, WsDirection, WsKind};
+use proxyzip_codec::{BodyView, ViewContext};
+use proxyzip_core::{FlowId, FlowSummary, Headers, LogLine, Timing, TlsInfo, WsDirection, WsKind};
 use proxyzip_export::curl::ComposedRequest;
 use proxyzip_proxy::Decision;
-use proxyzip_rules::{RuleSet, ThrottleProfile};
+use proxyzip_rules::{RequestInfo, RuleSet, ThrottleProfile};
+use proxyzip_script::{ScriptEngine, ScriptRequest, ScriptResponse, Verdict};
 use proxyzip_tls::CertificateAuthority;
 use serde::Serialize;
 use tauri::State;
 
-use crate::state::{AppState, Preferences};
+use crate::state::{AppState, Preferences, RecentSession, protos_dir};
 
 type CmdResult<T> = Result<T, String>;
 
@@ -62,6 +63,7 @@ pub struct FlowDetail {
     tls: Option<TlsInfo>,
     comment: Option<String>,
     ws_messages: Vec<WsView>,
+    logs: Vec<LogLine>,
 }
 
 #[tauri::command]
@@ -75,11 +77,30 @@ pub fn get_flow_detail(state: State<'_, AppState>, id: FlowId) -> CmdResult<Flow
         .flat_map(|c| c.split(';'))
         .filter_map(|kv| kv.trim().split_once('=').map(|(k, v)| (k.to_string(), v.to_string())))
         .collect();
+
+    // Schemas and the user's message-type mappings let Protobuf and gRPC bodies show field names.
+    let protos = state.protos.read().clone();
+    let info = RequestInfo {
+        method: &req.method,
+        scheme: req.scheme.as_str(),
+        host: &req.host,
+        port: req.port,
+        path: &req.path,
+    };
+    let (request_type, response_type) = state.rules.read().proto_types(&info).unwrap_or((None, None));
     let request = RequestView {
         headers: req.headers.clone(),
         query,
         cookies,
-        body: proxyzip_codec::view(&req.headers, &req.body, req.body_truncated),
+        body: proxyzip_codec::view_with(ViewContext {
+            headers: &req.headers,
+            body: &req.body,
+            truncated: req.body_truncated,
+            path: &req.path,
+            is_request: true,
+            protos: Some(&protos),
+            message_type: request_type.as_deref(),
+        }),
     };
     let response = flow.response.as_ref().map(|r| ResponseView {
         status: r.status,
@@ -87,7 +108,15 @@ pub fn get_flow_detail(state: State<'_, AppState>, id: FlowId) -> CmdResult<Flow
         http_version: r.http_version.clone(),
         headers: r.headers.clone(),
         set_cookies: r.headers.get_all("set-cookie").map(str::to_string).collect(),
-        body: proxyzip_codec::view(&r.headers, &r.body, r.body_truncated),
+        body: proxyzip_codec::view_with(ViewContext {
+            headers: &r.headers,
+            body: &r.body,
+            truncated: r.body_truncated,
+            path: &req.path,
+            is_request: false,
+            protos: Some(&protos),
+            message_type: response_type.as_deref(),
+        }),
     });
     let ws_messages = flow
         .ws_messages
@@ -110,6 +139,7 @@ pub fn get_flow_detail(state: State<'_, AppState>, id: FlowId) -> CmdResult<Flow
         tls: flow.tls.clone(),
         comment: flow.comment.clone(),
         ws_messages,
+        logs: flow.logs.clone(),
     })
 }
 
@@ -441,4 +471,218 @@ pub async fn release_breakpoints(state: State<'_, AppState>) -> CmdResult<()> {
         h.breakpoints.release_all();
     }
     Ok(())
+}
+
+// ---- Protobuf schemas -------------------------------------------------------------------------------------------------
+
+#[derive(Serialize)]
+pub struct ProtoInfo {
+    files: Vec<String>,
+    messages: Vec<String>,
+    methods: Vec<String>,
+}
+
+fn proto_info(state: &AppState) -> ProtoInfo {
+    let mut files: Vec<String> = std::fs::read_dir(protos_dir(&state.home))
+        .map(|d| d.flatten().filter(|e| e.path().is_file()).filter_map(|e| e.file_name().into_string().ok()).collect())
+        .unwrap_or_default();
+    files.sort();
+    let registry = state.protos.read();
+    ProtoInfo { files, messages: registry.message_names(), methods: registry.method_names() }
+}
+
+#[tauri::command]
+pub fn list_protos(state: State<'_, AppState>) -> ProtoInfo {
+    proto_info(&state)
+}
+
+/// Import a descriptor set (`protoc --descriptor_set_out=schema.desc --include_imports …`).
+#[tauri::command]
+pub fn import_proto(state: State<'_, AppState>, path: PathBuf) -> CmdResult<ProtoInfo> {
+    let bytes = std::fs::read(&path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
+    // Validate before keeping a copy, so a bad file never ends up in the schemas folder.
+    proxyzip_codec::ProtoRegistry::new().add_descriptor_set(&bytes).map_err(err)?;
+    let dir = protos_dir(&state.home);
+    std::fs::create_dir_all(&dir).map_err(err)?;
+    let name = path.file_name().and_then(|n| n.to_str()).ok_or("the file has no name")?;
+    std::fs::write(dir.join(name), bytes).map_err(err)?;
+    state.reload_protos();
+    Ok(proto_info(&state))
+}
+
+#[tauri::command]
+pub fn remove_proto(state: State<'_, AppState>, name: String) -> CmdResult<ProtoInfo> {
+    // Only plain file names inside the schemas folder.
+    if name.contains(['/', '\\']) || name.starts_with('.') {
+        return Err("invalid file name".into());
+    }
+    std::fs::remove_file(protos_dir(&state.home).join(&name)).map_err(err)?;
+    state.reload_protos();
+    Ok(proto_info(&state))
+}
+
+// ---- Code generation and jq --------------------------------------------------------------------------------------------
+
+#[derive(Serialize)]
+pub struct LanguageInfo {
+    id: &'static str,
+    label: &'static str,
+    syntax: &'static str,
+}
+
+#[tauri::command]
+pub fn code_languages() -> Vec<LanguageInfo> {
+    proxyzip_export::codegen::Language::ALL
+        .iter()
+        .map(|l| LanguageInfo { id: l.id(), label: l.label(), syntax: l.syntax() })
+        .collect()
+}
+
+#[tauri::command]
+pub fn generate_code(state: State<'_, AppState>, id: FlowId, language: String) -> CmdResult<String> {
+    let flow = state.store.get(id).ok_or("flow not found")?;
+    let language = proxyzip_export::codegen::Language::from_id(&language).ok_or("unknown language")?;
+    Ok(proxyzip_export::codegen::generate(&flow, language))
+}
+
+/// Run a jq filter over a flow's request or response body.
+#[tauri::command]
+pub fn query_body(
+    state: State<'_, AppState>,
+    id: FlowId,
+    part: String,
+    expr: String,
+) -> CmdResult<Vec<serde_json::Value>> {
+    let flow = state.store.get(id).ok_or("flow not found")?;
+    let (headers, body) = match part.as_str() {
+        "request" => (&flow.request.headers, &flow.request.body),
+        "response" => {
+            let r = flow.response.as_ref().ok_or("this flow has no response")?;
+            (&r.headers, &r.body)
+        }
+        _ => return Err("part must be request or response".into()),
+    };
+    let (decoded, _, error) = proxyzip_codec::decode_content(headers, body);
+    if let Some(e) = error {
+        return Err(format!("could not decode the body: {e}"));
+    }
+    proxyzip_codec::query::run(&decoded, &expr)
+}
+
+// ---- Sessions and exports ----------------------------------------------------------------------------------------------
+
+fn select_flows(state: &AppState, ids: Option<Vec<FlowId>>) -> Vec<proxyzip_core::Flow> {
+    match ids {
+        Some(ids) if !ids.is_empty() => state.store.get_many(&ids),
+        _ => state.store.all(),
+    }
+}
+
+/// Save flows (all of them, or the selected ones) to a `.pzsession` file.
+#[tauri::command]
+pub fn save_session(state: State<'_, AppState>, path: PathBuf, ids: Option<Vec<FlowId>>) -> CmdResult<usize> {
+    let flows = select_flows(&state, ids);
+    let bytes = proxyzip_export::session::write(&flows).map_err(|e| format!("{e:#}"))?;
+    std::fs::write(&path, bytes).map_err(err)?;
+    state.remember_session(&path, flows.len());
+    Ok(flows.len())
+}
+
+/// Open a `.pzsession` file, replacing the current list or adding to it.
+#[tauri::command]
+pub fn open_session(state: State<'_, AppState>, path: PathBuf, append: bool) -> CmdResult<usize> {
+    let bytes = std::fs::read(&path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
+    let flows = proxyzip_export::session::read(&bytes).map_err(|e| format!("{e:#}"))?;
+    if !append {
+        state.store.clear();
+    }
+    let count = flows.len();
+    for flow in flows {
+        state.store.import(flow);
+    }
+    state.remember_session(&path, count);
+    Ok(count)
+}
+
+#[tauri::command]
+pub fn recent_sessions(state: State<'_, AppState>) -> Vec<RecentSession> {
+    state.recent_sessions()
+}
+
+#[tauri::command]
+pub fn forget_recent_session(state: State<'_, AppState>, path: String) {
+    state.forget_session(&path);
+}
+
+#[tauri::command]
+pub fn export_csv(state: State<'_, AppState>, path: PathBuf, ids: Option<Vec<FlowId>>) -> CmdResult<usize> {
+    let flows = select_flows(&state, ids);
+    std::fs::write(&path, proxyzip_export::csv::export(&flows)).map_err(err)?;
+    Ok(flows.len())
+}
+
+#[tauri::command]
+pub fn export_postman(state: State<'_, AppState>, path: PathBuf, ids: Option<Vec<FlowId>>) -> CmdResult<usize> {
+    let flows = select_flows(&state, ids);
+    let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("ProxyZip").to_string();
+    let json = proxyzip_export::postman::export_json(&name, &flows).map_err(err)?;
+    std::fs::write(&path, json).map_err(err)?;
+    Ok(flows.len())
+}
+
+// ---- Script testing ---------------------------------------------------------------------------------------------------
+
+fn verdict_json<T>(
+    verdict: Result<Verdict<T>, String>,
+    to_json: impl Fn(&T) -> serde_json::Value,
+    unchanged: serde_json::Value,
+) -> serde_json::Value {
+    match verdict {
+        Ok(Verdict::Unchanged) => serde_json::json!({ "outcome": "unchanged", "value": unchanged }),
+        Ok(Verdict::Changed(v)) => serde_json::json!({ "outcome": "changed", "value": to_json(&v) }),
+        Ok(Verdict::Block) => serde_json::json!({ "outcome": "block", "value": null }),
+        Err(e) => serde_json::json!({ "outcome": "error", "error": e, "value": unchanged }),
+    }
+}
+
+/// Run a script against a captured flow without sending anything, and show what it would do.
+#[tauri::command]
+pub async fn test_script(state: State<'_, AppState>, source: String, id: FlowId) -> CmdResult<serde_json::Value> {
+    let flow = state.store.get(id).ok_or("flow not found")?;
+    let engine = match state.proxy.lock().await.as_ref() {
+        Some(handle) => handle.scripts.clone(),
+        None => Arc::new(ScriptEngine::default()),
+    };
+    let readable = |headers: &Headers, body: &[u8]| {
+        let (decoded, encodings, error) = proxyzip_codec::decode_content(headers, body);
+        let mut headers = headers.0.clone();
+        if !encodings.is_empty() && error.is_none() {
+            headers.retain(|(k, _)| {
+                !k.eq_ignore_ascii_case("content-encoding") && !k.eq_ignore_ascii_case("content-length")
+            });
+        }
+        (headers, decoded.to_vec())
+    };
+    let (headers, body) = readable(&flow.request.headers, &flow.request.body);
+    let request = ScriptRequest { method: flow.request.method.clone(), url: flow.request.url(), headers, body };
+
+    let request_run = engine.run_request(&source, &request).await;
+    let mut logs = request_run.logs;
+    let effective = match &request_run.verdict {
+        Ok(Verdict::Changed(r)) => r.clone(),
+        _ => request.clone(),
+    };
+    let request_json = verdict_json(request_run.verdict, ScriptRequest::to_json, request.to_json());
+
+    let response_json = match &flow.response {
+        Some(r) => {
+            let (headers, body) = readable(&r.headers, &r.body);
+            let response = ScriptResponse { status: r.status, headers, body };
+            let run = engine.run_response(&source, &effective, &response).await;
+            logs.extend(run.logs);
+            Some(verdict_json(run.verdict, ScriptResponse::to_json, response.to_json()))
+        }
+        None => None,
+    };
+    Ok(serde_json::json!({ "request": request_json, "response": response_json, "logs": logs }))
 }

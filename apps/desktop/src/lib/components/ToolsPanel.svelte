@@ -8,7 +8,9 @@
   import MapLocalTab from "./tools/MapLocalTab.svelte";
   import MapRemoteTab from "./tools/MapRemoteTab.svelte";
   import NetworkTab from "./tools/NetworkTab.svelte";
+  import ProtobufTab from "./tools/ProtobufTab.svelte";
   import RecordingTab from "./tools/RecordingTab.svelte";
+  import ScriptsTab from "./tools/ScriptsTab.svelte";
   import RewriteTab from "./tools/RewriteTab.svelte";
   import ThrottleTab from "./tools/ThrottleTab.svelte";
 
@@ -22,6 +24,8 @@
     { id: "map_remote", label: "Map Remote", icon: "shuffle", count: (r) => r.map_remote.length },
     { id: "rewrite", label: "Rewrite", icon: "edit", count: (r) => r.rewrite.length },
     { id: "breakpoints", label: "Breakpoints", icon: "pause", count: (r) => r.breakpoints.length },
+    { id: "scripts", label: "Scripts", icon: "code", count: (r) => r.scripts.length },
+    { id: "protobuf", label: "Protobuf", icon: "layers", count: (r) => r.proto_mappings.length },
     { id: "throttle", label: "Throttling", icon: "gauge", count: (r) => (r.throttle.enabled ? 1 : 0) },
     { id: "dns", label: "DNS", icon: "globe", count: (r) => r.dns.length },
     { id: "network", label: "Proxy & ports", icon: "network", count: (r) => r.reverse.length + (r.upstream.enabled ? 1 : 0) + (r.socks.enabled ? 1 : 0) },
@@ -80,6 +84,8 @@
         {:else if app.toolsTab === "map_remote"}<MapRemoteTab bind:rules={draft} />
         {:else if app.toolsTab === "rewrite"}<RewriteTab bind:rules={draft} />
         {:else if app.toolsTab === "breakpoints"}<BreakpointsTab bind:rules={draft} />
+        {:else if app.toolsTab === "scripts"}<ScriptsTab bind:rules={draft} />
+        {:else if app.toolsTab === "protobuf"}<ProtobufTab bind:rules={draft} />
         {:else if app.toolsTab === "throttle"}<ThrottleTab bind:rules={draft} />
         {:else if app.toolsTab === "dns"}<DnsTab bind:rules={draft} />
         {:else if app.toolsTab === "network"}<NetworkTab bind:rules={draft} />

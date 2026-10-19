@@ -1,0 +1,15 @@
+const axios = require("axios");
+
+const response = await axios.request({
+  method: "post",
+  url: "https://api.example.com/v1/items?id=2",
+  headers: {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer abc",
+    "X-Note": "it's \"quoted\" $5 #{x}",
+  },
+  data: "{\"name\":\"ada\",\"note\":\"line1\\nline2 \\\"q\\\" $x\"}",
+  transformResponse: (data) => data,
+  validateStatus: () => true,
+});
+console.log(response.status, response.data);

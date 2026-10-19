@@ -1,0 +1,14 @@
+import requests
+
+response = requests.request(
+    "POST",
+    "https://api.example.com/v1/items?id=2",
+    headers={
+        "Content-Type": "application/json",
+        "Authorization": "Bearer abc",
+        "X-Note": "it's \"quoted\" $5 #{x}",
+    },
+    data="{\"name\":\"ada\",\"note\":\"line1\\nline2 \\\"q\\\" $x\"}".encode("utf-8"),
+)
+print(response.status_code)
+print(response.text)

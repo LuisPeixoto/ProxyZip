@@ -5,6 +5,7 @@
   import {
     addBreakpointFor,
     blockHost,
+    compare,
     copy,
     copyCurl,
     copyResponseBody,
@@ -101,6 +102,8 @@
       items: [
         { label: "Copy URL", icon: "copy", action: () => copy(f.url, "URL copied") },
         { label: "Copy as cURL", icon: "terminal", disabled: many, action: () => copyCurl(f.id) },
+        { label: "Generate code…", icon: "code", disabled: many || f.method === "CONNECT", action: () => (app.codeFor = f.id) },
+        { label: "Compare the two selected", icon: "columns", disabled: ids.length !== 2, shortcut: "⌘D", action: () => compare(ids) },
         { label: "Copy response body", icon: "code", disabled: many || f.response_size == null, action: () => copyResponseBody(f.id) },
         { separator: true },
         { label: "Repeat request", icon: "repeat", shortcut: "⌘R", disabled: many || f.method === "CONNECT", action: () => repeat(f.id) },
@@ -209,6 +212,7 @@
             </span>
             <span class="mono truncate px-2.5 text-[11.5px] {failed ? '' : 'text-fg/80'}" title={failed ? f.error : f.url}>
               {#if failed && f.error}<span class="opacity-90">{f.path || f.host} — {f.error}</span>{:else}{f.path}{/if}
+              {#if f.graphql}<span class="ml-1.5 rounded bg-accent-soft px-1 text-[10px] font-medium text-accent">{f.graphql}</span>{/if}
               {#each f.tags as tag (tag)}<span class="ml-1.5 rounded px-1 text-[10px] font-medium {tagClass(tag)}">{tag}</span>{/each}
               {#if f.ws_message_count}<span class="ml-1.5 rounded bg-accent-soft px-1 text-[10px] text-accent">{f.ws_message_count} msgs</span>{/if}
               {#if f.has_comment}<Icon name="comment" size={11} class="ml-1 inline text-warn" />{/if}

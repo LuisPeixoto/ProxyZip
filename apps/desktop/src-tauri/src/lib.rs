@@ -83,6 +83,19 @@ pub fn run() {
             commands::throttle_presets,
             commands::resolve_breakpoint,
             commands::release_breakpoints,
+            commands::list_protos,
+            commands::import_proto,
+            commands::remove_proto,
+            commands::code_languages,
+            commands::generate_code,
+            commands::query_body,
+            commands::save_session,
+            commands::open_session,
+            commands::recent_sessions,
+            commands::forget_recent_session,
+            commands::export_csv,
+            commands::export_postman,
+            commands::test_script,
             commands::ssl_proxying_toggle_host,
         ])
         .build(tauri::generate_context!())
@@ -93,6 +106,7 @@ pub fn run() {
             // Never leave the machine pointing at a proxy that no longer exists.
             if let Some(state) = handle.try_state::<AppState>() {
                 state.restore_system_proxy();
+                state.save_last_session();
             }
         }
     });

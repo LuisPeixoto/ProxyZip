@@ -1,0 +1,10 @@
+const response = await fetch("https://api.example.com/v1/items?id=2", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer abc",
+    "X-Note": "it's \"quoted\" $5 #{x}",
+  },
+  body: "{\"name\":\"ada\",\"note\":\"line1\\nline2 \\\"q\\\" $x\"}",
+});
+console.log(response.status, await response.text());

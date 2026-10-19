@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use parking_lot::RwLock;
+use proxyzip_codec::ProtoRegistry;
 use proxyzip_core::FlowStore;
 use proxyzip_proxy::{ProxyConfig, ProxyHandle, ProxyServer, ProxySettings, SslProxyingPolicy};
 use proxyzip_rules::RuleSet;
@@ -22,6 +23,18 @@ pub struct Preferences {
     pub max_body_capture_mb: usize,
     pub insecure_upstream: bool,
     pub max_flows: usize,
+    /// Save the session when the app quits and load it again on the next launch.
+    pub restore_last_session: bool,
+}
+
+/// A session file the user saved or opened recently.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecentSession {
+    pub path: String,
+    pub name: String,
+    /// Milliseconds since the Unix epoch.
+    pub saved_at: i64,
+    pub flows: usize,
 }
 
 impl Default for Preferences {
@@ -33,6 +46,7 @@ impl Default for Preferences {
             max_body_capture_mb: 32,
             insecure_upstream: false,
             max_flows: 50_000,
+            restore_last_session: false,
         }
     }
 }
@@ -63,6 +77,35 @@ impl Preferences {
     }
 }
 
+const MAX_RECENT: usize = 10;
+
+pub fn protos_dir(home: &std::path::Path) -> PathBuf {
+    home.join("protos")
+}
+
+/// Read every descriptor set in the protos folder. Files that cannot be read are skipped with a warning.
+fn load_protos(home: &std::path::Path) -> ProtoRegistry {
+    let mut registry = ProtoRegistry::new();
+    let Ok(entries) = std::fs::read_dir(protos_dir(home)) else { return registry };
+    let mut paths: Vec<_> = entries.flatten().map(|e| e.path()).filter(|p| p.is_file()).collect();
+    paths.sort();
+    for path in paths {
+        match std::fs::read(&path).map_err(|e| e.to_string()).and_then(|bytes| registry.add_descriptor_set(&bytes)) {
+            Ok(()) => {}
+            Err(e) => tracing::warn!(file = %path.display(), error = %e, "skipping an invalid descriptor set"),
+        }
+    }
+    registry
+}
+
+fn recent_path(home: &std::path::Path) -> PathBuf {
+    home.join("recent.json")
+}
+
+fn last_session_path(home: &std::path::Path) -> PathBuf {
+    home.join("last.pzsession")
+}
+
 fn rules_path(home: &std::path::Path) -> PathBuf {
     home.join("rules.json")
 }
@@ -83,6 +126,8 @@ pub struct AppState {
     pub ca: RwLock<Arc<CertificateAuthority>>,
     pub prefs: RwLock<Preferences>,
     pub rules: RwLock<RuleSet>,
+    /// Protobuf schemas imported by the user, for decoding bodies and gRPC.
+    pub protos: RwLock<ProtoRegistry>,
     /// Reverse proxy and SOCKS5 listeners that failed to start (for example, a port in use).
     pub listener_errors: RwLock<Vec<String>>,
     pub proxy: Mutex<Option<ProxyHandle>>,
@@ -104,12 +149,14 @@ impl AppState {
             ca: RwLock::new(ca),
             prefs: RwLock::new(prefs),
             rules: RwLock::new(load_rules(&home_for_rules)),
+            protos: RwLock::new(load_protos(&home_for_rules)),
             listener_errors: RwLock::new(Vec::new()),
             proxy: Mutex::new(None),
             listen: RwLock::new(None),
             last_error: RwLock::new(None),
             system_proxy_owned: RwLock::new(false),
         };
+        state.restore_last_session();
         if let Err(e) = state.start_proxy(true).await {
             tracing::error!(error = %e, "could not start proxy");
             *state.last_error.write() = Some(format!("{e:#}"));
@@ -171,6 +218,83 @@ impl AppState {
         };
         *self.listener_errors.write() = errors.clone();
         Ok(errors)
+    }
+
+    pub fn reload_protos(&self) {
+        *self.protos.write() = load_protos(&self.home);
+    }
+
+    pub fn recent_sessions(&self) -> Vec<RecentSession> {
+        std::fs::read_to_string(recent_path(&self.home))
+            .ok()
+            .and_then(|s| serde_json::from_str::<Vec<RecentSession>>(&s).ok())
+            .map(|list| list.into_iter().filter(|r| std::path::Path::new(&r.path).exists()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Put `path` at the top of the recent sessions list.
+    pub fn remember_session(&self, path: &std::path::Path, flows: usize) {
+        let mut list = self.recent_sessions();
+        let path_text = path.display().to_string();
+        list.retain(|r| r.path != path_text);
+        list.insert(
+            0,
+            RecentSession {
+                name: path.file_stem().and_then(|s| s.to_str()).unwrap_or("Session").to_string(),
+                path: path_text,
+                saved_at: proxyzip_core::now_ms(),
+                flows,
+            },
+        );
+        list.truncate(MAX_RECENT);
+        if let Ok(json) = serde_json::to_string_pretty(&list) {
+            let _ = std::fs::create_dir_all(&self.home);
+            let _ = std::fs::write(recent_path(&self.home), json);
+        }
+    }
+
+    pub fn forget_session(&self, path: &str) {
+        let mut list = self.recent_sessions();
+        list.retain(|r| r.path != path);
+        if let Ok(json) = serde_json::to_string_pretty(&list) {
+            let _ = std::fs::write(recent_path(&self.home), json);
+        }
+    }
+
+    /// On quit: keep the session for the next launch if the user asked for that.
+    pub fn save_last_session(&self) {
+        if !self.prefs.read().restore_last_session {
+            return;
+        }
+        let path = last_session_path(&self.home);
+        let flows = self.store.all();
+        if flows.is_empty() {
+            let _ = std::fs::remove_file(&path);
+            return;
+        }
+        match proxyzip_export::session::write(&flows).map_err(|e| e.to_string()).and_then(|b| {
+            let _ = std::fs::create_dir_all(&self.home);
+            std::fs::write(&path, b).map_err(|e| e.to_string())
+        }) {
+            Ok(()) => {}
+            Err(e) => tracing::warn!(error = %e, "could not save the session for the next launch"),
+        }
+    }
+
+    fn restore_last_session(&self) {
+        if !self.prefs.read().restore_last_session {
+            return;
+        }
+        let path = last_session_path(&self.home);
+        let Ok(bytes) = std::fs::read(&path) else { return };
+        match proxyzip_export::session::read(&bytes) {
+            Ok(flows) => {
+                for flow in flows {
+                    self.store.import(flow);
+                }
+            }
+            Err(e) => tracing::warn!(error = %e, "could not restore the last session"),
+        }
     }
 
     /// Address clients should use (loopback even when listening on all interfaces).

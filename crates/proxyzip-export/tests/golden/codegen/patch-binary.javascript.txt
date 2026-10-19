@@ -1,0 +1,10 @@
+const response = await fetch("https://api.example.com/v1/items?id=2", {
+  method: "PATCH",
+  headers: {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer abc",
+    "X-Note": "it's \"quoted\" $5 #{x}",
+  },
+  body: Uint8Array.from(atob("/wAB"), (c) => c.charCodeAt(0)),
+});
+console.log(response.status, await response.text());

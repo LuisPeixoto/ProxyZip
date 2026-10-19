@@ -1,0 +1,30 @@
+package main
+
+import (
+	"bytes"
+	"encoding/base64"
+	"fmt"
+	"io"
+	"net/http"
+)
+
+func main() {
+	data, _ := base64.StdEncoding.DecodeString("/wAB")
+	body := bytes.NewReader(data)
+	req, err := http.NewRequest("PATCH", "https://api.example.com/v1/items?id=2", body)
+	if err != nil {
+		panic(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer abc")
+	req.Header.Set("X-Note", "it's \"quoted\" $5 #{x}")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		panic(err)
+	}
+	defer resp.Body.Close()
+
+	data2, _ := io.ReadAll(resp.Body)
+	fmt.Println(resp.StatusCode, string(data2))
+}
