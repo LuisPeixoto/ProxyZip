@@ -76,6 +76,13 @@ pub fn run() {
             commands::import_har,
             commands::terminal_env,
             commands::repeat_flow,
+            commands::send_request,
+            commands::parse_curl,
+            commands::get_rules,
+            commands::save_rules,
+            commands::throttle_presets,
+            commands::resolve_breakpoint,
+            commands::release_breakpoints,
             commands::ssl_proxying_toggle_host,
         ])
         .build(tauri::generate_context!())
