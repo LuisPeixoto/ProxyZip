@@ -11,6 +11,7 @@ use hyper_util::server::conn::auto;
 use parking_lot::{Mutex, RwLock};
 use proxyzip_core::{FlowStore, Scheme, TlsInfo};
 use proxyzip_rules::RuleSet;
+use proxyzip_script::ScriptEngine;
 use proxyzip_tls::{CertificateAuthority, FileKeyLog};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::watch;
@@ -31,6 +32,7 @@ pub(crate) struct Ctx {
     pub keylog: Option<Arc<dyn rustls::KeyLog>>,
     pub listen: SocketAddr,
     pub breakpoints: Arc<BreakpointHub>,
+    pub scripts: Arc<ScriptEngine>,
 }
 
 /// What we know about the client connection a request arrived on.
@@ -103,6 +105,8 @@ pub struct ProxyHandle {
     pub settings: Arc<RwLock<ProxySettings>>,
     /// Resolve flows paused at breakpoints.
     pub breakpoints: Arc<BreakpointHub>,
+    /// The JavaScript engine that runs scripts, shared so the app can also test scripts against saved flows.
+    pub scripts: Arc<ScriptEngine>,
     /// Reverse proxy and SOCKS5 listeners that could not start when the proxy was created.
     pub listener_errors: Vec<String>,
     ctx: Arc<Ctx>,
@@ -152,6 +156,7 @@ impl ProxyServer {
         };
         let settings = Arc::new(RwLock::new(settings));
         let breakpoints = BreakpointHub::new();
+        let scripts = Arc::new(ScriptEngine::default());
         let ctx = Arc::new(Ctx {
             store,
             ca,
@@ -160,6 +165,7 @@ impl ProxyServer {
             keylog,
             listen: local_addr,
             breakpoints: breakpoints.clone(),
+            scripts: scripts.clone(),
         });
         let ctx_for_handle = ctx.clone();
         let (tx, mut rx) = watch::channel(false);
@@ -188,6 +194,7 @@ impl ProxyServer {
             local_addr,
             settings,
             breakpoints,
+            scripts,
             listener_errors,
             ctx: ctx_for_handle,
             extras,
