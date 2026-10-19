@@ -165,6 +165,16 @@ pub enum FlowState {
     Failed,
     /// CONNECT tunnel forwarded without decryption (SSL proxying disabled for the host).
     Tunnel,
+    /// Held at a breakpoint, waiting for the user.
+    Paused,
+}
+
+/// Where a breakpoint stopped a flow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BreakpointPhase {
+    Request,
+    Response,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -182,6 +192,10 @@ pub struct Flow {
     /// Free-form user annotations (comment, color, pin) set from the UI.
     pub comment: Option<String>,
     pub pinned: bool,
+    /// Labels describing what happened to the flow: `blocked`, `map-local`, `map-remote`, `rewrite`,
+    /// `breakpoint`, `edited`, `throttle`.
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 impl Flow {
@@ -200,6 +214,14 @@ impl Flow {
             ws_messages: Vec::new(),
             comment: None,
             pinned: false,
+            tags: Vec::new(),
+        }
+    }
+
+    /// Add a tag once.
+    pub fn add_tag(&mut self, tag: &str) {
+        if !self.tags.iter().any(|t| t == tag) {
+            self.tags.push(tag.to_string());
         }
     }
 
@@ -235,6 +257,7 @@ impl Flow {
             ws_message_count: self.ws_messages.len(),
             pinned: self.pinned,
             has_comment: self.comment.is_some(),
+            tags: self.tags.clone(),
         }
     }
 }
@@ -262,6 +285,7 @@ pub struct FlowSummary {
     pub ws_message_count: usize,
     pub pinned: bool,
     pub has_comment: bool,
+    pub tags: Vec<String>,
 }
 
 pub fn now_ms() -> i64 {
