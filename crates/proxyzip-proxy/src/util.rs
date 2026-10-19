@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use http::HeaderMap;
+use http::{HeaderMap, HeaderName, HeaderValue};
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
 use proxyzip_core::Headers;
@@ -14,6 +14,39 @@ pub fn to_headers(map: &HeaderMap) -> Headers {
     Headers(
         map.iter().map(|(k, v)| (k.as_str().to_string(), String::from_utf8_lossy(v.as_bytes()).into_owned())).collect(),
     )
+}
+
+/// Rebuild a header map from the editable header list. Entries that are not valid HTTP headers are skipped.
+pub fn to_header_map(headers: &Headers) -> HeaderMap {
+    let mut map = HeaderMap::new();
+    for (name, value) in headers.iter() {
+        if let (Ok(n), Ok(v)) = (HeaderName::from_bytes(name.as_bytes()), HeaderValue::from_str(value)) {
+            map.append(n, v);
+        }
+    }
+    map
+}
+
+/// Returned from a service to make hyper close the client connection without answering.
+#[derive(Debug)]
+pub struct ConnectionDropped;
+
+impl std::fmt::Display for ConnectionDropped {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("connection dropped by a ProxyZip rule")
+    }
+}
+
+impl std::error::Error for ConnectionDropped {}
+
+/// `host` or `host:port`, leaving out the scheme's default port.
+pub fn authority_for(scheme: &str, host: &str, port: u16) -> String {
+    let default = matches!((scheme, port), ("http" | "ws", 80) | ("https" | "wss", 443));
+    if default {
+        if host.contains(':') { format!("[{host}]") } else { host.to_string() }
+    } else {
+        format_authority(host, port)
+    }
 }
 
 pub fn version_str(v: http::Version) -> String {
@@ -87,6 +120,18 @@ mod tests {
         assert_eq!(split_authority("a.com", 443), ("a.com".into(), 443));
         assert_eq!(split_authority("[::1]:80", 443), ("::1".into(), 80));
         assert_eq!(format_authority("::1", 80), "[::1]:80");
+    }
+
+    #[test]
+    fn header_round_trip_and_authority() {
+        let headers =
+            Headers(vec![("X-A".into(), "1".into()), ("x-a".into(), "2".into()), ("bad name".into(), "x".into())]);
+        let map = to_header_map(&headers);
+        assert_eq!(map.get_all("x-a").iter().count(), 2);
+        assert_eq!(map.len(), 2);
+        assert_eq!(authority_for("https", "a.com", 443), "a.com");
+        assert_eq!(authority_for("http", "a.com", 8080), "a.com:8080");
+        assert_eq!(authority_for("http", "::1", 80), "[::1]");
     }
 
     #[test]

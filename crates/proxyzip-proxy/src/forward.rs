@@ -1,20 +1,32 @@
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as B64;
 use bytes::Bytes;
 use http::header::HeaderValue;
 use http_body::{Body, Frame, SizeHint};
 use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
 use hyper::{Request, Response, StatusCode};
-use proxyzip_core::{FlowId, FlowState, FlowStore, Scheme, now_ms};
+use proxyzip_core::{BreakpointPhase, FlowId, FlowState, FlowStore, Headers, Scheme, now_ms};
+use proxyzip_rules::{
+    Action, BlockAction, LocalFile, Plan, Remap, RequestInfo, RequestParts, ResponseParts, apply_request_ops,
+    apply_response_ops, content_type_for, decode_response_body, set_header,
+};
 
+use crate::breakpoint::{Decision, RequestEdit, ResponseEdit};
 use crate::server::{Conn, Ctx};
+use crate::throttle::ThrottledBody;
 use crate::util::{
-    ProxyBody, format_authority, full, is_websocket_upgrade, split_authority, strip_hop_by_hop, to_headers, version_str,
+    ConnectionDropped, ProxyBody, authority_for, format_authority, full, is_websocket_upgrade, split_authority,
+    strip_hop_by_hop, to_header_map, to_headers, version_str,
 };
 use crate::{local, websocket};
+
+type Reply = Result<Response<ProxyBody>, ConnectionDropped>;
 
 struct Target {
     scheme: Scheme,
@@ -23,8 +35,17 @@ struct Target {
     path: String,
 }
 
+fn default_port(scheme: Scheme) -> u16 {
+    if scheme.is_secure() { 443 } else { 80 }
+}
+
 fn resolve_target(req: &Request<Incoming>, conn: &Conn) -> Option<Target> {
     let path = req.uri().path_and_query().map(|p| p.as_str().to_string()).unwrap_or_else(|| "/".into());
+    if let Some(reverse) = &conn.reverse {
+        let request_path = req.uri().path_and_query().map_or("/", |p| p.as_str());
+        let path = format!("{}{request_path}", reverse.base_path);
+        return Some(Target { scheme: reverse.scheme, host: reverse.host.clone(), port: reverse.port, path });
+    }
     let host_header = req.headers().get(http::header::HOST).and_then(|h| h.to_str().ok());
     if let Some((tunnel_host, tunnel_port)) = &conn.tunnel_target {
         // Inside a tunnel requests are origin-form; HTTP/2 carries :authority in the URI.
@@ -46,21 +67,30 @@ fn resolve_target(req: &Request<Incoming>, conn: &Conn) -> Option<Target> {
             return Some(Target { scheme: Scheme::Http, host, port, path });
         }
     };
-    let default_port = if scheme == Scheme::Https { 443 } else { 80 };
     let host = req.uri().host()?.trim_start_matches('[').trim_end_matches(']').to_string();
-    let port = req.uri().port_u16().unwrap_or(default_port);
+    let port = req.uri().port_u16().unwrap_or(default_port(scheme));
     Some(Target { scheme, host, port, path })
 }
 
-pub(crate) async fn forward(mut req: Request<Incoming>, ctx: Arc<Ctx>, conn: Conn) -> Response<ProxyBody> {
-    let Some(target) = resolve_target(&req, &conn) else {
-        return error_response(StatusCode::BAD_REQUEST, "ProxyZip: request has no target host");
-    };
-    if conn.tunnel_target.is_none() && local::is_local(&target.host, target.port, &ctx) {
-        return local::respond(&target.path, &ctx);
+fn flow_scheme(websocket: bool, secure: bool) -> Scheme {
+    match (websocket, secure) {
+        (true, true) => Scheme::Wss,
+        (true, false) => Scheme::Ws,
+        (false, true) => Scheme::Https,
+        (false, false) => Scheme::Http,
     }
-    if target.host.eq_ignore_ascii_case(local::CERT_HOST) {
-        return local::respond(&target.path, &ctx);
+}
+
+pub(crate) async fn forward(mut req: Request<Incoming>, ctx: Arc<Ctx>, conn: Conn) -> Reply {
+    let Some(mut target) = resolve_target(&req, &conn) else {
+        return Ok(error_response(StatusCode::BAD_REQUEST, "ProxyZip: request has no target host"));
+    };
+    let host_header = req.headers().get(http::header::HOST).and_then(|h| h.to_str().ok()).map(str::to_string);
+    if conn.reverse.is_none() && conn.tunnel_target.is_none() && local::is_local(&target.host, target.port, &ctx) {
+        return Ok(local::respond(&target.path, &ctx, host_header.as_deref()));
+    }
+    if conn.reverse.is_none() && target.host.eq_ignore_ascii_case(local::CERT_HOST) {
+        return Ok(local::respond(&target.path, &ctx, host_header.as_deref()));
     }
 
     let websocket = is_websocket_upgrade(req.headers()) && req.version() <= http::Version::HTTP_11;
@@ -71,17 +101,23 @@ pub(crate) async fn forward(mut req: Request<Incoming>, ctx: Arc<Ctx>, conn: Con
     let body = match body.collect().await {
         Ok(b) => b.to_bytes(),
         Err(e) => {
-            return error_response(StatusCode::BAD_REQUEST, &format!("ProxyZip: reading request body failed: {e}"));
+            return Ok(error_response(StatusCode::BAD_REQUEST, &format!("ProxyZip: reading request body failed: {e}")));
         }
     };
 
-    let scheme = match (websocket, target.scheme.is_secure()) {
-        (true, true) => Scheme::Wss,
-        (true, false) => Scheme::Ws,
-        (false, true) => Scheme::Https,
-        (false, false) => Scheme::Http,
+    let scheme = flow_scheme(websocket, target.scheme.is_secure());
+    let rules = settings.rules.clone();
+    let info = RequestInfo {
+        method: parts.method.as_str(),
+        scheme: scheme.as_str(),
+        host: &target.host,
+        port: target.port,
+        path: &target.path,
     };
-    let flow_id = settings.recording.then(|| {
+    let plan = rules.plan(&info);
+    let record = settings.recording && rules.should_record(&info);
+
+    let flow_id = record.then(|| {
         let captured = body.slice(..body.len().min(settings.max_body_capture));
         let request = proxyzip_core::Request {
             method: parts.method.to_string(),
@@ -95,39 +131,137 @@ pub(crate) async fn forward(mut req: Request<Incoming>, ctx: Arc<Ctx>, conn: Con
             body_truncated: body.len() > settings.max_body_capture,
         };
         let id = ctx.store.create(conn.peer.to_string(), request);
-        if conn.tls.is_some() {
-            let tls = conn.tls.clone();
-            ctx.store.update(id, |f| f.tls = tls);
-        }
+        let tls = conn.tls.clone();
+        let tags = plan.tags.clone();
+        ctx.store.update(id, |f| {
+            f.tls = tls;
+            for tag in &tags {
+                f.add_tag(tag);
+            }
+        });
         id
     });
 
+    match plan.action.clone() {
+        Action::Forward => {}
+        Action::Block(BlockAction::Drop) => {
+            fail_flow(&ctx.store, flow_id, "Connection dropped by a block rule");
+            return Err(ConnectionDropped);
+        }
+        Action::Block(BlockAction::Status { code }) => {
+            let headers = vec![
+                ("content-type".to_string(), "text/plain; charset=utf-8".to_string()),
+                ("x-proxyzip-rule".to_string(), "block".to_string()),
+            ];
+            let text = format!("Blocked by a ProxyZip rule: {} {}{}", parts.method, target.host, target.path);
+            return Ok(synthetic(&ctx.store, flow_id, code, headers, Bytes::from(text)));
+        }
+        Action::MapLocal(file) => return Ok(map_local(&ctx.store, flow_id, &file).await),
+    }
+
+    // From here on the flow is "in flight"; the guard fails it if the client hangs up.
+    let mut guard = PendingGuard { store: ctx.store.clone(), id: flow_id };
+
+    let mut req_parts = RequestParts {
+        method: parts.method.to_string(),
+        path: target.path.clone(),
+        headers: to_headers(&parts.headers),
+        body,
+    };
+    let mut modified = false;
+    if conn.reverse.is_some() {
+        // The client addressed the proxy; the server must see its own name.
+        let authority = authority_for(target.scheme.as_str(), &target.host, target.port);
+        set_header(&mut req_parts.headers, "host", &authority);
+        modified = true;
+    }
+    if let Some(remap) = &plan.remap {
+        apply_remap(&mut target, remap, &mut req_parts);
+        modified = true;
+    }
+    modified |= apply_request_ops(&plan.request_ops, &mut req_parts);
+    target.path = req_parts.path.clone();
+
+    let mut edited_by_user = false;
+    if plan.break_on_request
+        && let Some(id) = flow_id
+    {
+        sync_request(&ctx.store, id, flow_scheme(websocket, target.scheme.is_secure()), &target, &req_parts, &settings);
+        ctx.store.update(id, |f| f.state = FlowState::Paused);
+        ctx.store.notify_breakpoint(id, BreakpointPhase::Request);
+        let decision = ctx.breakpoints.pause(id).await;
+        ctx.store.update(id, |f| f.state = FlowState::Pending);
+        match decision {
+            Decision::Abort => {
+                guard.id = None;
+                fail_flow(&ctx.store, flow_id, "Aborted at a breakpoint");
+                return Err(ConnectionDropped);
+            }
+            Decision::EditRequest(edit) => {
+                apply_request_edit(&mut target, &mut req_parts, edit);
+                edited_by_user = true;
+                modified = true;
+            }
+            Decision::Continue | Decision::EditResponse(_) => {}
+        }
+    }
+    if modified && let Some(id) = flow_id {
+        sync_request(&ctx.store, id, flow_scheme(websocket, target.scheme.is_secure()), &target, &req_parts, &settings);
+        if edited_by_user {
+            ctx.store.update(id, |f| f.add_tag("edited"));
+        }
+    }
+
     let wire_scheme = if target.scheme.is_secure() { "https" } else { "http" };
     let uri = format!("{wire_scheme}://{}{}", format_authority(&target.host, target.port), target.path);
-    let mut headers = parts.headers.clone();
+    // Untouched requests keep the exact header values the client sent.
+    let mut headers = if modified { to_header_map(&req_parts.headers) } else { parts.headers.clone() };
+    strip_hop_by_hop(&mut headers);
     if websocket {
-        strip_hop_by_hop(&mut headers);
         headers.insert(http::header::CONNECTION, HeaderValue::from_static("Upgrade"));
         headers.insert(http::header::UPGRADE, HeaderValue::from_static("websocket"));
         // tungstenite cannot relay compressed frames; keep the session uncompressed.
         headers.remove(http::header::SEC_WEBSOCKET_EXTENSIONS);
-    } else {
-        strip_hop_by_hop(&mut headers);
     }
-    let mut builder = Request::builder().method(parts.method.clone()).uri(&uri).version(http::Version::HTTP_11);
+    let method = match http::Method::from_bytes(req_parts.method.as_bytes()) {
+        Ok(m) => m,
+        Err(_) => {
+            guard.id = None;
+            return Ok(fail(
+                &ctx.store,
+                flow_id,
+                StatusCode::BAD_REQUEST,
+                format!("invalid method {}", req_parts.method),
+            ));
+        }
+    };
+    let mut builder = Request::builder().method(method).uri(&uri).version(http::Version::HTTP_11);
     *builder.headers_mut().unwrap() = headers;
-    let upstream_req = match builder.body(Full::new(body)) {
+    let upstream_req = match builder.body(Full::new(req_parts.body.clone())) {
         Ok(r) => r,
         Err(e) => {
-            return fail(&ctx.store, flow_id, StatusCode::BAD_REQUEST, format!("invalid upstream request {uri}: {e}"));
+            guard.id = None;
+            return Ok(fail(
+                &ctx.store,
+                flow_id,
+                StatusCode::BAD_REQUEST,
+                format!("invalid upstream request {uri}: {e}"),
+            ));
         }
     };
 
     if let Some(id) = flow_id {
         ctx.store.update(id, |f| f.timing.request_sent = Some(now_ms()));
     }
-    // hyper drops this future when the client hangs up; the guard records that.
-    let mut guard = PendingGuard { store: ctx.store.clone(), id: flow_id };
+    if let Some(profile) = &plan.throttle {
+        let mut delay = Duration::from_millis(profile.latency_ms);
+        if let Some(rate) = profile.upload_bytes_per_sec() {
+            delay += Duration::from_secs_f64(req_parts.body.len() as f64 / rate as f64);
+        }
+        if !delay.is_zero() {
+            tokio::time::sleep(delay).await;
+        }
+    }
     let client = ctx.upstream.pick(settings.insecure_upstream, websocket);
     let mut response = match client.request(upstream_req).await {
         Ok(r) => r,
@@ -139,46 +273,53 @@ pub(crate) async fn forward(mut req: Request<Incoming>, ctx: Arc<Ctx>, conn: Con
                 source = s.source();
             }
             guard.id = None;
-            return fail(&ctx.store, flow_id, StatusCode::BAD_GATEWAY, msg);
+            return Ok(fail(&ctx.store, flow_id, StatusCode::BAD_GATEWAY, msg));
         }
     };
     guard.id = None;
 
     let status = response.status();
-    if let Some(id) = flow_id {
-        let headers = to_headers(response.headers());
-        let version = version_str(response.version());
-        ctx.store.update(id, |f| {
-            f.timing.response_started = Some(now_ms());
-            f.state = FlowState::Receiving;
-            f.response = Some(proxyzip_core::Response {
-                status: status.as_u16(),
-                reason: status.canonical_reason().unwrap_or("").to_string(),
-                http_version: version,
-                headers,
-                body: Bytes::new(),
-                body_truncated: false,
-            });
-        });
-    }
-
     if status == StatusCode::SWITCHING_PROTOCOLS
         && let Some(client_upgrade) = client_upgrade
     {
+        if let Some(id) = flow_id {
+            record_head(
+                &ctx.store,
+                id,
+                status.as_u16(),
+                &to_headers(response.headers()),
+                &version_str(response.version()),
+            );
+            ctx.store.update(id, |f| f.state = FlowState::WebSocketOpen);
+        }
         let server_upgrade = hyper::upgrade::on(&mut response);
         let mut out = Response::builder().status(StatusCode::SWITCHING_PROTOCOLS);
         *out.headers_mut().unwrap() = response.headers().clone();
-        if let Some(id) = flow_id {
-            ctx.store.update(id, |f| f.state = FlowState::WebSocketOpen);
-        }
         tokio::spawn(websocket::relay(client_upgrade, server_upgrade, ctx.store.clone(), flow_id));
-        return out.body(full("")).unwrap();
+        return Ok(out.body(full("")).unwrap());
     }
 
-    let (mut parts, body) = response.into_parts();
-    strip_hop_by_hop(&mut parts.headers);
+    let version = version_str(response.version());
+    let (mut rparts, rbody) = response.into_parts();
+    if plan.needs_response_body() {
+        return buffered_response(&ctx, flow_id, &plan, &settings, rparts, rbody, &version).await;
+    }
+
+    // Header-only rewrites still stream the body.
+    if !plan.response_ops.is_empty() {
+        let mut res =
+            ResponseParts { status: rparts.status.as_u16(), headers: to_headers(&rparts.headers), body: Bytes::new() };
+        if apply_response_ops(&plan.response_ops, &mut res) {
+            rparts.status = StatusCode::from_u16(res.status).unwrap_or(rparts.status);
+            rparts.headers = to_header_map(&res.headers);
+        }
+    }
+    if let Some(id) = flow_id {
+        record_head(&ctx.store, id, rparts.status.as_u16(), &to_headers(&rparts.headers), &version);
+    }
+    strip_hop_by_hop(&mut rparts.headers);
     let body = TapBody {
-        inner: body,
+        inner: rbody,
         buf: Vec::new(),
         cap: settings.max_body_capture,
         truncated: false,
@@ -186,19 +327,273 @@ pub(crate) async fn forward(mut req: Request<Incoming>, ctx: Arc<Ctx>, conn: Con
         id: flow_id,
         done: false,
     };
-    Response::from_parts(parts, body.boxed())
+    let body = match plan.throttle.as_ref().and_then(|t| t.download_bytes_per_sec()) {
+        Some(rate) => ThrottledBody::new(body, rate).boxed(),
+        None => body.boxed(),
+    };
+    Ok(Response::from_parts(rparts, body))
+}
+
+/// Hold the whole response so it can be rewritten or edited at a breakpoint before it reaches the client.
+async fn buffered_response(
+    ctx: &Arc<Ctx>,
+    flow_id: Option<FlowId>,
+    plan: &Plan,
+    settings: &crate::config::ProxySettings,
+    rparts: http::response::Parts,
+    rbody: Incoming,
+    version: &str,
+) -> Reply {
+    let body = match rbody.collect().await {
+        Ok(b) => b.to_bytes(),
+        Err(e) => {
+            return Ok(fail(&ctx.store, flow_id, StatusCode::BAD_GATEWAY, format!("reading the response failed: {e}")));
+        }
+    };
+    let mut res = ResponseParts { status: rparts.status.as_u16(), headers: to_headers(&rparts.headers), body };
+    // Edits and previews work on readable bytes, so remove the content encoding up front.
+    decode_response_body(&mut res);
+    apply_response_ops(&plan.response_ops, &mut res);
+
+    if let Some(id) = flow_id {
+        record_buffered(&ctx.store, id, &res, version, settings.max_body_capture, FlowState::Receiving);
+    }
+    if plan.break_on_response
+        && let Some(id) = flow_id
+    {
+        ctx.store.update(id, |f| f.state = FlowState::Paused);
+        ctx.store.notify_breakpoint(id, BreakpointPhase::Response);
+        let decision = ctx.breakpoints.pause(id).await;
+        match decision {
+            Decision::Abort => {
+                fail_flow(&ctx.store, flow_id, "Aborted at a breakpoint");
+                return Err(ConnectionDropped);
+            }
+            Decision::EditResponse(edit) => {
+                apply_response_edit(&mut res, edit);
+                ctx.store.update(id, |f| f.add_tag("edited"));
+            }
+            Decision::Continue | Decision::EditRequest(_) => {}
+        }
+    }
+    if let Some(id) = flow_id {
+        record_buffered(&ctx.store, id, &res, version, settings.max_body_capture, FlowState::Completed);
+        ctx.store.update(id, |f| f.timing.finished = Some(now_ms()));
+    }
+
+    let mut headers = to_header_map(&res.headers);
+    strip_hop_by_hop(&mut headers);
+    headers.remove(http::header::CONTENT_LENGTH);
+    let body = match plan.throttle.as_ref().and_then(|t| t.download_bytes_per_sec()) {
+        Some(rate) => ThrottledBody::new(full(res.body), rate).boxed(),
+        None => full(res.body),
+    };
+    let mut out = Response::new(body);
+    *out.status_mut() = StatusCode::from_u16(res.status).unwrap_or(StatusCode::BAD_GATEWAY);
+    *out.headers_mut() = headers;
+    Ok(out)
+}
+
+fn apply_remap(target: &mut Target, remap: &Remap, req: &mut RequestParts) {
+    if let Some(scheme) = &remap.scheme {
+        let old_default = default_port(target.scheme);
+        target.scheme = if matches!(scheme.as_str(), "https" | "wss") { Scheme::Https } else { Scheme::Http };
+        if remap.port.is_none() && target.port == old_default {
+            target.port = default_port(target.scheme);
+        }
+    }
+    if let Some(host) = &remap.host {
+        target.host = host.trim_start_matches('[').trim_end_matches(']').to_string();
+    }
+    if let Some(port) = remap.port {
+        target.port = port;
+    }
+    if let Some(path) = &remap.path {
+        let query = req.path.split_once('?').map(|(_, q)| q.to_string());
+        req.path = match query {
+            Some(q) if !path.contains('?') => format!("{path}?{q}"),
+            _ => path.clone(),
+        };
+    }
+    if !remap.keep_host_header {
+        let authority = authority_for(target.scheme.as_str(), &target.host, target.port);
+        set_header(&mut req.headers, "host", &authority);
+    }
+}
+
+fn apply_request_edit(target: &mut Target, req: &mut RequestParts, edit: RequestEdit) {
+    let old_authority = authority_for(target.scheme.as_str(), &target.host, target.port);
+    let method = edit.method.trim();
+    if !method.is_empty() {
+        req.method = method.to_ascii_uppercase();
+    }
+    let url = edit.url.trim();
+    if url.starts_with('/') {
+        req.path = url.to_string();
+    } else if let Ok(uri) = url.parse::<http::Uri>()
+        && let (Some(scheme), Some(host)) = (uri.scheme_str(), uri.host())
+    {
+        target.scheme = if matches!(scheme, "https" | "wss") { Scheme::Https } else { Scheme::Http };
+        target.host = host.trim_start_matches('[').trim_end_matches(']').to_string();
+        target.port = uri.port_u16().unwrap_or(default_port(target.scheme));
+        req.path = uri.path_and_query().map_or_else(|| "/".to_string(), |p| p.as_str().to_string());
+    } else {
+        tracing::debug!(url, "ignoring an edited URL that could not be parsed");
+    }
+    target.path = req.path.clone();
+    req.headers = Headers(edit.headers);
+    if let Ok(bytes) = B64.decode(edit.body_base64.as_bytes()) {
+        req.body = Bytes::from(bytes);
+        proxyzip_rules::remove_header(&mut req.headers, "content-length");
+    }
+    let new_authority = authority_for(target.scheme.as_str(), &target.host, target.port);
+    let host_matches_old = req.headers.get("host").is_none_or(|h| h.eq_ignore_ascii_case(&old_authority));
+    if new_authority != old_authority && host_matches_old {
+        set_header(&mut req.headers, "host", &new_authority);
+    }
+}
+
+fn apply_response_edit(res: &mut ResponseParts, edit: ResponseEdit) {
+    if (100..=999).contains(&edit.status) {
+        res.status = edit.status;
+    }
+    res.headers = Headers(edit.headers);
+    if let Ok(bytes) = B64.decode(edit.body_base64.as_bytes()) {
+        res.body = Bytes::from(bytes);
+    }
+    proxyzip_rules::remove_header(&mut res.headers, "content-length");
+}
+
+/// Make the stored request match what is actually sent upstream.
+fn sync_request(
+    store: &FlowStore,
+    id: FlowId,
+    scheme: Scheme,
+    target: &Target,
+    req: &RequestParts,
+    settings: &crate::config::ProxySettings,
+) {
+    let cap = settings.max_body_capture;
+    store.update(id, |f| {
+        f.request.method = req.method.clone();
+        f.request.scheme = scheme;
+        f.request.host = target.host.clone();
+        f.request.port = target.port;
+        f.request.path = req.path.clone();
+        f.request.headers = req.headers.clone();
+        f.request.body = req.body.slice(..req.body.len().min(cap));
+        f.request.body_truncated = req.body.len() > cap;
+    });
+}
+
+fn reason(status: u16) -> String {
+    StatusCode::from_u16(status).ok().and_then(|s| s.canonical_reason()).unwrap_or("").to_string()
+}
+
+fn record_head(store: &FlowStore, id: FlowId, status: u16, headers: &Headers, version: &str) {
+    let headers = headers.clone();
+    let version = version.to_string();
+    store.update(id, |f| {
+        f.timing.response_started = Some(now_ms());
+        f.state = FlowState::Receiving;
+        f.response = Some(proxyzip_core::Response {
+            status,
+            reason: reason(status),
+            http_version: version,
+            headers,
+            body: Bytes::new(),
+            body_truncated: false,
+        });
+    });
+}
+
+fn record_buffered(store: &FlowStore, id: FlowId, res: &ResponseParts, version: &str, cap: usize, state: FlowState) {
+    store.update(id, |f| {
+        f.timing.response_started.get_or_insert_with(now_ms);
+        f.state = state;
+        f.response = Some(proxyzip_core::Response {
+            status: res.status,
+            reason: reason(res.status),
+            http_version: version.to_string(),
+            headers: res.headers.clone(),
+            body: res.body.slice(..res.body.len().min(cap)),
+            body_truncated: res.body.len() > cap,
+        });
+    });
+}
+
+/// Answer without contacting any server, recording the answer on the flow.
+fn synthetic(
+    store: &FlowStore,
+    id: Option<FlowId>,
+    status: u16,
+    headers: Vec<(String, String)>,
+    body: Bytes,
+) -> Response<ProxyBody> {
+    if let Some(id) = id {
+        let recorded = Headers(headers.clone());
+        let recorded_body = body.clone();
+        store.update(id, |f| {
+            let now = now_ms();
+            f.timing.request_sent = Some(now);
+            f.timing.response_started = Some(now);
+            f.timing.finished = Some(now);
+            f.state = FlowState::Completed;
+            f.response = Some(proxyzip_core::Response {
+                status,
+                reason: reason(status),
+                http_version: "HTTP/1.1".into(),
+                headers: recorded,
+                body: recorded_body,
+                body_truncated: false,
+            });
+        });
+    }
+    let mut out = Response::new(full(body));
+    *out.status_mut() = StatusCode::from_u16(status).unwrap_or(StatusCode::FORBIDDEN);
+    *out.headers_mut() = to_header_map(&Headers(headers));
+    out
+}
+
+async fn map_local(store: &FlowStore, id: Option<FlowId>, file: &LocalFile) -> Response<ProxyBody> {
+    match tokio::fs::read(&file.path).await {
+        Ok(bytes) => {
+            let content_type = file.content_type.clone().unwrap_or_else(|| content_type_for(&file.path).to_string());
+            let mut headers = vec![
+                ("content-type".to_string(), content_type),
+                ("x-proxyzip-rule".to_string(), "map-local".to_string()),
+            ];
+            for (k, v) in &file.headers {
+                headers.retain(|(name, _)| !name.eq_ignore_ascii_case(k));
+                headers.push((k.clone(), v.clone()));
+            }
+            synthetic(store, id, file.status, headers, Bytes::from(bytes))
+        }
+        Err(e) => {
+            let text = format!("ProxyZip Map Local: cannot read {}: {e}", file.path.display());
+            let headers = vec![
+                ("content-type".to_string(), "text/plain; charset=utf-8".to_string()),
+                ("x-proxyzip-rule".to_string(), "map-local-error".to_string()),
+            ];
+            synthetic(store, id, 404, headers, Bytes::from(text))
+        }
+    }
+}
+
+fn fail_flow(store: &FlowStore, id: Option<FlowId>, msg: &str) {
+    if let Some(id) = id {
+        let msg = msg.to_string();
+        store.update(id, |f| {
+            f.state = FlowState::Failed;
+            f.error = Some(msg);
+            f.timing.finished = Some(now_ms());
+        });
+    }
 }
 
 fn fail(store: &FlowStore, id: Option<FlowId>, status: StatusCode, msg: String) -> Response<ProxyBody> {
     tracing::debug!(%msg, "request failed");
-    if let Some(id) = id {
-        let m = msg.clone();
-        store.update(id, |f| {
-            f.state = FlowState::Failed;
-            f.error = Some(m);
-            f.timing.finished = Some(now_ms());
-        });
-    }
+    fail_flow(store, id, &msg);
     error_response(status, &format!("ProxyZip: {msg}"))
 }
 
