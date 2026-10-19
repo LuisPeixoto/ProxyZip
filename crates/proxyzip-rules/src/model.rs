@@ -20,6 +20,7 @@ pub struct ToolToggles {
     pub map_remote: bool,
     pub rewrite: bool,
     pub breakpoints: bool,
+    pub scripts: bool,
     pub dns: bool,
     pub reverse: bool,
 }
@@ -32,6 +33,7 @@ impl Default for ToolToggles {
             map_remote: true,
             rewrite: true,
             breakpoints: true,
+            scripts: true,
             dns: true,
             reverse: true,
         }
@@ -49,6 +51,8 @@ pub struct RuleSet {
     pub map_remote: Vec<MapRemoteRule>,
     pub rewrite: Vec<RewriteRule>,
     pub breakpoints: Vec<BreakpointRule>,
+    pub scripts: Vec<ScriptRule>,
+    pub proto_mappings: Vec<ProtoMapping>,
     pub throttle: Throttle,
     pub dns: Vec<DnsRule>,
     pub upstream: UpstreamProxy,
@@ -263,6 +267,56 @@ pub struct BreakpointRule {
 impl Default for BreakpointRule {
     fn default() -> Self {
         Self { name: String::new(), enabled: true, matcher: Matcher::default(), on_request: true, on_response: false }
+    }
+}
+
+/// JavaScript that runs on matching requests and/or responses.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ScriptRule {
+    pub name: String,
+    pub enabled: bool,
+    pub matcher: Matcher,
+    /// JavaScript defining `onRequest(ctx, request)` and/or `onResponse(ctx, request, response)`.
+    pub source: String,
+    pub on_request: bool,
+    pub on_response: bool,
+}
+
+impl Default for ScriptRule {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            enabled: true,
+            matcher: Matcher::default(),
+            source: String::new(),
+            on_request: true,
+            on_response: true,
+        }
+    }
+}
+
+/// Tells the inspector which Protobuf message types a plain (non-gRPC) endpoint uses.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProtoMapping {
+    pub name: String,
+    pub enabled: bool,
+    pub matcher: Matcher,
+    /// Fully qualified type of the request body, such as `demo.HelloRequest`.
+    pub request_type: Option<String>,
+    pub response_type: Option<String>,
+}
+
+impl Default for ProtoMapping {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            enabled: true,
+            matcher: Matcher::default(),
+            request_type: None,
+            response_type: None,
+        }
     }
 }
 

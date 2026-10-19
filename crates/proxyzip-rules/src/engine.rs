@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::matcher::{Matcher, wildcard_match};
 use crate::model::Phase;
 use crate::model::{
-    BlockAction, LocalSource, MapLocalRule, ReverseRule, RewriteOp, RuleSet, ThrottleProfile, UpstreamProxy,
+    BlockAction, LocalSource, MapLocalRule, ReverseRule, RewriteOp, RuleSet, ScriptRule, ThrottleProfile, UpstreamProxy,
 };
 
 /// What the engine needs to know about a request.
@@ -56,6 +56,10 @@ pub struct Plan {
     pub response_ops: Vec<RewriteOp>,
     pub break_on_request: bool,
     pub break_on_response: bool,
+    /// Scripts to run on the request, in order.
+    pub request_scripts: Vec<ScriptRule>,
+    /// Scripts to run on the response, in order.
+    pub response_scripts: Vec<ScriptRule>,
     pub throttle: Option<ThrottleProfile>,
     /// Labels shown next to the request in the list: `blocked`, `map-local`, `map-remote`, `rewrite`, `breakpoint`.
     pub tags: Vec<String>,
@@ -64,7 +68,9 @@ pub struct Plan {
 impl Plan {
     /// Whether the response body must be held back (rewritten or edited) instead of streamed.
     pub fn needs_response_body(&self) -> bool {
-        self.break_on_response || self.response_ops.iter().any(|op| matches!(op, RewriteOp::ReplaceBody { .. }))
+        self.break_on_response
+            || !self.response_scripts.is_empty()
+            || self.response_ops.iter().any(|op| matches!(op, RewriteOp::ReplaceBody { .. }))
     }
 }
 
@@ -125,6 +131,20 @@ impl RuleSet {
             }
         }
 
+        if self.tools.scripts {
+            for rule in self.scripts.iter().filter(|r| r.enabled && self.is_match(&r.matcher, info)) {
+                if rule.on_request {
+                    plan.request_scripts.push(rule.clone());
+                }
+                if rule.on_response {
+                    plan.response_scripts.push(rule.clone());
+                }
+            }
+            if !plan.request_scripts.is_empty() || !plan.response_scripts.is_empty() {
+                plan.tags.push("script".into());
+            }
+        }
+
         if self.tools.breakpoints {
             for rule in self.breakpoints.iter().filter(|r| r.enabled && self.is_match(&r.matcher, info)) {
                 plan.break_on_request |= rule.on_request;
@@ -142,6 +162,13 @@ impl RuleSet {
             plan.tags.push("throttle".into());
         }
         plan
+    }
+
+    /// Protobuf message types configured for this request: `(request type, response type)`.
+    pub fn proto_types(&self, info: &RequestInfo) -> Option<(Option<String>, Option<String>)> {
+        self.proto_mappings.iter().find(|m| m.enabled && self.is_match(&m.matcher, info)).map(|m| {
+            (m.request_type.clone().filter(|t| !t.is_empty()), m.response_type.clone().filter(|t| !t.is_empty()))
+        })
     }
 
     /// Address configured for `host` by a DNS override, if any.
@@ -391,6 +418,45 @@ mod tests {
         assert_eq!(plan.throttle.unwrap().name, "3G");
         set.throttle.matchers.clear();
         assert!(set.plan(&info("GET", "anything.dev", "/")).throttle.is_some());
+    }
+
+    #[test]
+    fn scripts_are_planned_per_phase_and_hold_the_response() {
+        let mut set = RuleSet::default();
+        set.scripts.push(ScriptRule {
+            name: "both".into(),
+            matcher: Matcher::new("api.dev"),
+            source: "function onRequest(){}".into(),
+            ..Default::default()
+        });
+        set.scripts.push(ScriptRule {
+            matcher: Matcher::new("api.dev"),
+            on_request: false,
+            on_response: true,
+            ..Default::default()
+        });
+        set.scripts.push(ScriptRule { enabled: false, matcher: Matcher::new("api.dev"), ..Default::default() });
+        let plan = set.plan(&info("GET", "api.dev", "/"));
+        assert_eq!(plan.request_scripts.len(), 1);
+        assert_eq!(plan.response_scripts.len(), 2);
+        assert!(plan.needs_response_body(), "a response script needs the whole body");
+        assert_eq!(plan.tags, ["script"]);
+        assert!(set.plan(&info("GET", "other.dev", "/")).request_scripts.is_empty());
+        set.tools.scripts = false;
+        assert!(set.plan(&info("GET", "api.dev", "/")).request_scripts.is_empty());
+    }
+
+    #[test]
+    fn proto_mappings_name_the_message_types() {
+        let mut set = RuleSet::default();
+        set.proto_mappings.push(ProtoMapping {
+            matcher: Matcher::new("api.dev/rpc/*"),
+            request_type: Some("demo.Req".into()),
+            response_type: Some(String::new()),
+            ..Default::default()
+        });
+        assert_eq!(set.proto_types(&info("POST", "api.dev", "/rpc/x")), Some((Some("demo.Req".into()), None)));
+        assert_eq!(set.proto_types(&info("POST", "api.dev", "/other")), None);
     }
 
     #[test]
