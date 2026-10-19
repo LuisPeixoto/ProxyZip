@@ -1,0 +1,18 @@
+[package]
+name = "proxyzip-tls"
+description = "Root CA management and on-the-fly leaf certificates for ProxyZip MITM"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+lru.workspace = true
+parking_lot.workspace = true
+rcgen.workspace = true
+rustls.workspace = true
+rustls-pemfile.workspace = true
+time.workspace = true
+tracing.workspace = true
