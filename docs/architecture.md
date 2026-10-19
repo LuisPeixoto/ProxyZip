@@ -28,8 +28,9 @@ a Tauri desktop app) sit on top.
 | `proxyzip-proxy` | Listener, `CONNECT` handling, TLS interception, HTTP/1.1, HTTP/2, WebSocket relay, upstream client. |
 | `proxyzip-tls` | Root CA creation and persistence, per-host leaf certificates with an LRU cache, TLS key logging. |
 | `proxyzip-rules` | The rule model (`rules.json`), request matching, and the pure functions that decide what happens to a request and rewrite it. No I/O. |
-| `proxyzip-codec` | Content-encoding removal (gzip, deflate, Brotli, Zstandard), content classification, pretty-printing. |
-| `proxyzip-export` | HAR 1.2 import and export, cURL generation. |
+| `proxyzip-script` | QuickJS runtime for user scripts: worker threads, time and memory limits, hashing helpers implemented in Rust. |
+| `proxyzip-codec` | Content-encoding removal (gzip, deflate, Brotli, Zstandard), classification, pretty-printing, and structured viewers: Protobuf, gRPC, MessagePack, SSE, GraphQL, jq. |
+| `proxyzip-export` | HAR 1.2, `.pzsession` sessions, CSV, Postman collections and code generation in 14 languages. |
 | `proxyzip-sysproxy` | Enable, disable and read the operating-system proxy (networksetup, WinINet registry, gsettings and KDE). |
 | `proxyzip-certinstall` | Trust the CA in OS and application stores, iOS Simulator setup, terminal environment. |
 | `proxyzip-cli` | The `proxyzip` binary. |
