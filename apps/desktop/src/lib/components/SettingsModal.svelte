@@ -120,6 +120,8 @@
             <div class="flex items-center gap-2"><input id="maxbody" type="number" min="1" bind:value={prefs.max_body_capture_mb} class="h-8 w-24 rounded-lg border border-line bg-panel-2 px-2.5 outline-none focus:border-accent" /> MB <span class="text-faint">(bodies are always forwarded in full)</span></div>
             <label for="maxflows" class="text-muted">Keep at most</label>
             <div class="flex items-center gap-2"><input id="maxflows" type="number" min="100" step="1000" bind:value={prefs.max_flows} class="h-8 w-28 rounded-lg border border-line bg-panel-2 px-2.5 outline-none focus:border-accent" /> flows <span class="text-faint">(applies after restart)</span></div>
+            <span class="text-muted">Sessions</span>
+            <label class="flex items-center gap-2"><input type="checkbox" bind:checked={prefs.restore_last_session} class="accent-[var(--accent)]" /> Restore the last session when ProxyZip starts</label>
             <span class="text-muted">Upstream certificates</span>
             <label class="flex items-center gap-2"><input type="checkbox" bind:checked={prefs.insecure_upstream} class="accent-[var(--accent)]" /> Don't verify server certificates <span class="text-warn">(insecure)</span></label>
           </div>
