@@ -1,7 +1,7 @@
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
@@ -11,11 +11,12 @@ use http_body::{Body, Frame, SizeHint};
 use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
 use hyper::{Request, Response, StatusCode};
-use proxyzip_core::{BreakpointPhase, FlowId, FlowState, FlowStore, Headers, Scheme, now_ms};
+use proxyzip_core::{BreakpointPhase, FlowId, FlowState, FlowStore, Headers, LogLine, Scheme, now_ms};
 use proxyzip_rules::{
     Action, BlockAction, LocalFile, Plan, Remap, RequestInfo, RequestParts, ResponseParts, apply_request_ops,
-    apply_response_ops, content_type_for, decode_response_body, set_header,
+    apply_response_ops, content_type_for, decode_request_body, decode_response_body, set_header,
 };
+use proxyzip_script::{ScriptRequest, ScriptResponse, Verdict};
 
 use crate::breakpoint::{Decision, RequestEdit, ResponseEdit};
 use crate::server::{Conn, Ctx};
@@ -70,6 +71,22 @@ fn resolve_target(req: &Request<Incoming>, conn: &Conn) -> Option<Target> {
     let host = req.uri().host()?.trim_start_matches('[').trim_end_matches(']').to_string();
     let port = req.uri().port_u16().unwrap_or(default_port(scheme));
     Some(Target { scheme, host, port, path })
+}
+
+/// `query GetUser`-style label when a JSON request body is a GraphQL operation.
+fn graphql_label(headers: &http::HeaderMap, body: &Bytes) -> Option<String> {
+    if body.is_empty() {
+        return None;
+    }
+    let content_type = headers.get(http::header::CONTENT_TYPE)?.to_str().ok()?.to_ascii_lowercase();
+    if !content_type.contains("json") && !content_type.contains("graphql") {
+        return None;
+    }
+    let (decoded, _, error) = proxyzip_codec::decode_content(&to_headers(headers), body);
+    if error.is_some() {
+        return None;
+    }
+    proxyzip_codec::graphql::label(&decoded)
 }
 
 fn flow_scheme(websocket: bool, secure: bool) -> Scheme {
@@ -133,8 +150,10 @@ pub(crate) async fn forward(mut req: Request<Incoming>, ctx: Arc<Ctx>, conn: Con
         let id = ctx.store.create(conn.peer.to_string(), request);
         let tls = conn.tls.clone();
         let tags = plan.tags.clone();
+        let graphql = graphql_label(&parts.headers, &body);
         ctx.store.update(id, |f| {
             f.tls = tls;
+            f.graphql = graphql;
             for tag in &tags {
                 f.add_tag(tag);
             }
@@ -181,6 +200,24 @@ pub(crate) async fn forward(mut req: Request<Incoming>, ctx: Arc<Ctx>, conn: Con
     }
     modified |= apply_request_ops(&plan.request_ops, &mut req_parts);
     target.path = req_parts.path.clone();
+
+    if !plan.request_scripts.is_empty() {
+        match run_request_scripts(&ctx, flow_id, &plan, &mut target, &mut req_parts).await {
+            ScriptFlow::Continue { changed } => modified |= changed,
+            ScriptFlow::Block => {
+                guard.id = None;
+                if let Some(id) = flow_id {
+                    ctx.store.update(id, |f| f.add_tag("blocked"));
+                }
+                let headers = vec![
+                    ("content-type".to_string(), "text/plain; charset=utf-8".to_string()),
+                    ("x-proxyzip-rule".to_string(), "script".to_string()),
+                ];
+                let text = format!("Blocked by a ProxyZip script: {} {}{}", req_parts.method, target.host, target.path);
+                return Ok(synthetic(&ctx.store, flow_id, 403, headers, Bytes::from(text)));
+            }
+        }
+    }
 
     let mut edited_by_user = false;
     if plan.break_on_request
@@ -302,7 +339,20 @@ pub(crate) async fn forward(mut req: Request<Incoming>, ctx: Arc<Ctx>, conn: Con
     let version = version_str(response.version());
     let (mut rparts, rbody) = response.into_parts();
     if plan.needs_response_body() {
-        return buffered_response(&ctx, flow_id, &plan, &settings, rparts, rbody, &version).await;
+        let script_request = (!plan.response_scripts.is_empty()).then(|| ScriptRequest {
+            method: req_parts.method.clone(),
+            url: current_url(&target, &req_parts),
+            headers: req_parts.headers.0.clone(),
+            body: req_parts.body.to_vec(),
+        });
+        let context = ResponseContext {
+            flow_id,
+            plan: &plan,
+            settings: &settings,
+            version: &version,
+            script_request: script_request.as_ref(),
+        };
+        return buffered_response(&ctx, &context, rparts, rbody).await;
     }
 
     // Header-only rewrites still stream the body.
@@ -318,6 +368,11 @@ pub(crate) async fn forward(mut req: Request<Incoming>, ctx: Arc<Ctx>, conn: Con
         record_head(&ctx.store, id, rparts.status.as_u16(), &to_headers(&rparts.headers), &version);
     }
     strip_hop_by_hop(&mut rparts.headers);
+    let live = rparts
+        .headers
+        .get(http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.to_ascii_lowercase().starts_with("text/event-stream"));
     let body = TapBody {
         inner: rbody,
         buf: Vec::new(),
@@ -326,6 +381,9 @@ pub(crate) async fn forward(mut req: Request<Incoming>, ctx: Arc<Ctx>, conn: Con
         store: ctx.store.clone(),
         id: flow_id,
         done: false,
+        live,
+        published: 0,
+        last_publish: Instant::now(),
     };
     let body = match plan.throttle.as_ref().and_then(|t| t.download_bytes_per_sec()) {
         Some(rate) => ThrottledBody::new(body, rate).boxed(),
@@ -335,15 +393,22 @@ pub(crate) async fn forward(mut req: Request<Incoming>, ctx: Arc<Ctx>, conn: Con
 }
 
 /// Hold the whole response so it can be rewritten or edited at a breakpoint before it reaches the client.
+/// What the buffered response path needs besides the connection itself.
+struct ResponseContext<'a> {
+    flow_id: Option<FlowId>,
+    plan: &'a Plan,
+    settings: &'a crate::config::ProxySettings,
+    version: &'a str,
+    script_request: Option<&'a ScriptRequest>,
+}
+
 async fn buffered_response(
     ctx: &Arc<Ctx>,
-    flow_id: Option<FlowId>,
-    plan: &Plan,
-    settings: &crate::config::ProxySettings,
+    context: &ResponseContext<'_>,
     rparts: http::response::Parts,
     rbody: Incoming,
-    version: &str,
 ) -> Reply {
+    let ResponseContext { flow_id, plan, settings, version, script_request } = *context;
     let body = match rbody.collect().await {
         Ok(b) => b.to_bytes(),
         Err(e) => {
@@ -354,6 +419,19 @@ async fn buffered_response(
     // Edits and previews work on readable bytes, so remove the content encoding up front.
     decode_response_body(&mut res);
     apply_response_ops(&plan.response_ops, &mut res);
+    if let Some(request) = script_request {
+        for rule in &plan.response_scripts {
+            let input = ScriptResponse { status: res.status, headers: res.headers.0.clone(), body: res.body.to_vec() };
+            let out = ctx.scripts.run_response(&rule.source, request, &input).await;
+            record_script_output(&ctx.store, flow_id, &rule.name, out.logs, out.verdict.as_ref().err());
+            if let Ok(Verdict::Changed(edited)) = out.verdict {
+                res.status = edited.status;
+                res.headers = Headers(edited.headers);
+                res.body = Bytes::from(edited.body);
+                proxyzip_rules::remove_header(&mut res.headers, "content-length");
+            }
+        }
+    }
 
     if let Some(id) = flow_id {
         record_buffered(&ctx.store, id, &res, version, settings.max_body_capture, FlowState::Receiving);
@@ -422,12 +500,23 @@ fn apply_remap(target: &mut Target, remap: &Remap, req: &mut RequestParts) {
 }
 
 fn apply_request_edit(target: &mut Target, req: &mut RequestParts, edit: RequestEdit) {
-    let old_authority = authority_for(target.scheme.as_str(), &target.host, target.port);
     let method = edit.method.trim();
     if !method.is_empty() {
         req.method = method.to_ascii_uppercase();
     }
-    let url = edit.url.trim();
+    req.headers = Headers(edit.headers);
+    if let Ok(bytes) = B64.decode(edit.body_base64.as_bytes()) {
+        req.body = Bytes::from(bytes);
+        proxyzip_rules::remove_header(&mut req.headers, "content-length");
+    }
+    apply_url(target, req, &edit.url);
+}
+
+/// Point the request at a new URL (absolute, or just a path). When the host changes and the `Host` header still named
+/// the old one, it follows.
+fn apply_url(target: &mut Target, req: &mut RequestParts, url: &str) {
+    let old_authority = authority_for(target.scheme.as_str(), &target.host, target.port);
+    let url = url.trim();
     if url.starts_with('/') {
         req.path = url.to_string();
     } else if let Ok(uri) = url.parse::<http::Uri>()
@@ -438,19 +527,87 @@ fn apply_request_edit(target: &mut Target, req: &mut RequestParts, edit: Request
         target.port = uri.port_u16().unwrap_or(default_port(target.scheme));
         req.path = uri.path_and_query().map_or_else(|| "/".to_string(), |p| p.as_str().to_string());
     } else {
-        tracing::debug!(url, "ignoring an edited URL that could not be parsed");
+        tracing::debug!(url, "ignoring a URL that could not be parsed");
     }
     target.path = req.path.clone();
-    req.headers = Headers(edit.headers);
-    if let Ok(bytes) = B64.decode(edit.body_base64.as_bytes()) {
-        req.body = Bytes::from(bytes);
-        proxyzip_rules::remove_header(&mut req.headers, "content-length");
-    }
     let new_authority = authority_for(target.scheme.as_str(), &target.host, target.port);
     let host_matches_old = req.headers.get("host").is_none_or(|h| h.eq_ignore_ascii_case(&old_authority));
     if new_authority != old_authority && host_matches_old {
         set_header(&mut req.headers, "host", &new_authority);
     }
+}
+
+fn current_url(target: &Target, req: &RequestParts) -> String {
+    let scheme = if target.scheme.is_secure() { "https" } else { "http" };
+    format!("{scheme}://{}{}", authority_for(scheme, &target.host, target.port), req.path)
+}
+
+enum ScriptFlow {
+    Continue {
+        changed: bool,
+    },
+    /// A script returned `null` from `onRequest`.
+    Block,
+}
+
+/// Run the matching request scripts in order. A script that fails is skipped and reported on the flow.
+async fn run_request_scripts(
+    ctx: &Arc<Ctx>,
+    flow_id: Option<FlowId>,
+    plan: &Plan,
+    target: &mut Target,
+    req: &mut RequestParts,
+) -> ScriptFlow {
+    // Scripts read and edit the body as text, so remove any content encoding first.
+    let mut changed = decode_request_body(req);
+    for rule in &plan.request_scripts {
+        let input = ScriptRequest {
+            method: req.method.clone(),
+            url: current_url(target, req),
+            headers: req.headers.0.clone(),
+            body: req.body.to_vec(),
+        };
+        let out = ctx.scripts.run_request(&rule.source, &input).await;
+        record_script_output(&ctx.store, flow_id, &rule.name, out.logs, out.verdict.as_ref().err());
+        match out.verdict {
+            Ok(Verdict::Unchanged) | Err(_) => {}
+            Ok(Verdict::Block) => return ScriptFlow::Block,
+            Ok(Verdict::Changed(edited)) => {
+                req.method = edited.method;
+                req.headers = Headers(edited.headers);
+                req.body = Bytes::from(edited.body);
+                proxyzip_rules::remove_header(&mut req.headers, "content-length");
+                apply_url(target, req, &edited.url);
+                changed = true;
+            }
+        }
+    }
+    ScriptFlow::Continue { changed }
+}
+
+/// Put what a script printed (and why it failed, if it did) on the flow.
+fn record_script_output(
+    store: &FlowStore,
+    id: Option<FlowId>,
+    name: &str,
+    mut logs: Vec<LogLine>,
+    error: Option<&String>,
+) {
+    let Some(id) = id else { return };
+    if let Some(error) = error {
+        let label = if name.is_empty() { "script".to_string() } else { format!("script “{name}”") };
+        logs.push(LogLine { level: "error".into(), message: format!("{label}: {error}"), timestamp: now_ms() });
+    }
+    if logs.is_empty() {
+        return;
+    }
+    let failed = error.is_some();
+    store.update(id, |f| {
+        f.logs.extend(logs);
+        if failed {
+            f.add_tag("script-error");
+        }
+    });
 }
 
 fn apply_response_edit(res: &mut ResponseParts, edit: ResponseEdit) {
@@ -633,9 +790,28 @@ struct TapBody {
     store: FlowStore,
     id: Option<FlowId>,
     done: bool,
+    /// Event streams publish what they have so far, so events show up while the stream is still open.
+    live: bool,
+    published: usize,
+    last_publish: Instant,
 }
 
 impl TapBody {
+    fn publish_partial(&mut self) {
+        let Some(id) = self.id else { return };
+        if self.buf.len() == self.published || self.last_publish.elapsed() < Duration::from_millis(250) {
+            return;
+        }
+        self.published = self.buf.len();
+        self.last_publish = Instant::now();
+        let partial = Bytes::copy_from_slice(&self.buf);
+        self.store.update(id, |f| {
+            if let Some(r) = f.response.as_mut() {
+                r.body = partial;
+            }
+        });
+    }
+
     fn finish(&mut self, error: Option<String>) {
         if self.done {
             return;
@@ -676,6 +852,9 @@ impl Body for TapBody {
                     let take = data.len().min(room);
                     let chunk = data.slice(..take);
                     self.buf.extend_from_slice(&chunk);
+                    if self.live {
+                        self.publish_partial();
+                    }
                 }
                 Poll::Ready(Some(Ok(frame)))
             }
