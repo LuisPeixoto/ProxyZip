@@ -1,6 +1,7 @@
 //! Tauri shell: owns the proxy, forwards flow events to the UI in batches and
 //! exposes commands for inspection, export and system integration.
 
+mod api_tools;
 mod commands;
 mod mcp;
 mod state;
@@ -69,6 +70,20 @@ pub fn run() {
             commands::set_pinned,
             commands::set_comment,
             commands::get_status,
+            api_tools::import_openapi,
+            api_tools::validate_openapi,
+            api_tools::add_mock_from_flow,
+            api_tools::suite_from_flows,
+            api_tools::open_suite,
+            api_tools::save_suite,
+            api_tools::export_suite_junit,
+            api_tools::run_suite,
+            api_tools::plugin_tab_content,
+            api_tools::set_plugin_settings,
+            api_tools::plugin_catalog,
+            api_tools::install_catalog_plugin,
+            commands::export_workspace,
+            commands::import_workspace,
             commands::list_plugins,
             commands::install_plugin,
             commands::set_plugin_enabled,
