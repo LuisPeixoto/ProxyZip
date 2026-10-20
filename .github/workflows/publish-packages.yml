@@ -1,0 +1,77 @@
+name: Publish packages
+
+# When a release is published, copy its Homebrew and Scoop manifests into the tap and the bucket.
+# Needs the secret PACKAGING_TOKEN: a fine-grained personal access token with "Contents: read and write" on
+# LuisPeixoto/homebrew-proxyzip and LuisPeixoto/scoop-proxyzip only. Without it the job does nothing.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish, for example v0.5.0
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-packages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Update the tap and the bucket
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - name: Look for the token
+        id: token
+        env:
+          PACKAGING_TOKEN: ${{ secrets.PACKAGING_TOKEN }}
+        run: |
+          if [ -z "$PACKAGING_TOKEN" ]; then
+            echo "::notice::PACKAGING_TOKEN is not set, so the tap and the bucket were not updated (see docs/distribution.md)"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Download the manifests
+        if: steps.token.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern package-manifests.zip
+          unzip -q package-manifests.zip -d manifests
+      - name: Update the Homebrew tap
+        if: steps.token.outputs.present == 'true'
+        env:
+          PACKAGING_TOKEN: ${{ secrets.PACKAGING_TOKEN }}
+        run: |
+          git clone --depth 1 "https://x-access-token:${PACKAGING_TOKEN}@github.com/LuisPeixoto/homebrew-proxyzip.git" tap
+          mkdir -p tap/Casks tap/Formula
+          cp manifests/homebrew/proxyzip.rb tap/Casks/proxyzip.rb
+          cp manifests/homebrew/proxyzip-cli.rb tap/Formula/proxyzip-cli.rb
+          cd tap
+          git config user.name "Luis Peixoto"
+          git config user.email "nandopeixotolfpc@gmail.com"
+          git add -A
+          if git diff --cached --quiet; then echo "The tap is already up to date."; exit 0; fi
+          git commit -m "feat: update ProxyZip to ${TAG#v}"
+          git push
+      - name: Update the Scoop bucket
+        if: steps.token.outputs.present == 'true'
+        env:
+          PACKAGING_TOKEN: ${{ secrets.PACKAGING_TOKEN }}
+        run: |
+          git clone --depth 1 "https://x-access-token:${PACKAGING_TOKEN}@github.com/LuisPeixoto/scoop-proxyzip.git" bucket
+          mkdir -p bucket/bucket
+          cp manifests/scoop/proxyzip.json bucket/bucket/proxyzip.json
+          cd bucket
+          git config user.name "Luis Peixoto"
+          git config user.email "nandopeixotolfpc@gmail.com"
+          git add -A
+          if git diff --cached --quiet; then echo "The bucket is already up to date."; exit 0; fi
+          git commit -m "feat: update ProxyZip to ${TAG#v}"
+          git push
