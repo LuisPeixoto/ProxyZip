@@ -1,0 +1,11 @@
+{
+  "id": "request-timeline",
+  "name": "Request timeline",
+  "version": "1.0.0",
+  "description": "Adds a Timeline tab to the inspector with the time spent in each phase.",
+  "author": "ProxyZip",
+  "api": 2,
+  "contributes": {
+    "tabs": [{ "id": "timeline", "name": "Timeline" }]
+  }
+}
