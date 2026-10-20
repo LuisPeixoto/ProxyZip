@@ -167,4 +167,5 @@ jobs:
           gh release download "$GITHUB_REF_NAME" --dir assets --pattern '*.dmg' --pattern '*.exe' --pattern '*.msi' --pattern '*.deb' --pattern '*.AppImage' --pattern '*.rpm' --pattern 'proxyzip-*.tar.gz' --pattern 'proxyzip-*.zip'
           python3 packaging/render.py --version "${GITHUB_REF_NAME#v}" --assets assets --out manifests
           (cd assets && sha256sum * > ../manifests/SHA256SUMS)
-          gh release upload "$GITHUB_REF_NAME" manifests/* --clobber
+          (cd manifests && zip -qr ../package-manifests.zip . -x SHA256SUMS)
+          gh release upload "$GITHUB_REF_NAME" package-manifests.zip manifests/SHA256SUMS --clobber

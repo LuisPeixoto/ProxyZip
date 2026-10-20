@@ -12,7 +12,7 @@ everything to a **draft** GitHub release for you to review and publish.
 | Linux `.AppImage`, `.deb` and `.rpm` | `desktop` job |
 | `latest.json` and the `.sig` files used by the in-app updater | `desktop` job |
 | `proxyzip-<version>-<target>.tar.gz` / `.zip` (command line, 5 targets) | `cli` job |
-| Homebrew, Scoop, winget and Flatpak manifests, `SHA256SUMS` | `packaging` job |
+| `package-manifests.zip` (Homebrew, Scoop, winget and Flatpak manifests) and `SHA256SUMS` | `packaging` job |
 
 ## Signing the installers
 
@@ -43,7 +43,7 @@ that people install manually.
 
 The `packaging` job renders the templates in [`packaging/templates`](../packaging/templates) with the release's version
 and checksums (`python3 packaging/render.py --version X --assets DIR --out DIR`) and attaches the result to the
-release. Publishing them is a manual, one-time setup per channel:
+release as `package-manifests.zip`. Publishing them is a manual, one-time setup per channel:
 
 | Channel | One-time setup | Each release |
 |---------|----------------|--------------|
