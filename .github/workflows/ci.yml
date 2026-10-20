@@ -70,3 +70,11 @@ jobs:
         run: npm run build
       - name: Clippy (desktop shell)
         run: cargo clippy -p proxyzip-desktop --all-targets -- -D warnings
+
+  packaging:
+    name: Package-manager templates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render and check the templates
+        run: python3 -m unittest packaging/test_render.py
