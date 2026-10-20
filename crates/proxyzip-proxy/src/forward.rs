@@ -117,7 +117,9 @@ where
     let client_upgrade = websocket.then(|| hyper::upgrade::on(&mut req));
     let settings = ctx.settings.read().clone();
 
-    let (parts, body) = req.into_parts();
+    let (mut parts, body) = req.into_parts();
+    // Requests sent by a replay suite carry a marker so they can be told apart in the list. It never reaches the server.
+    let from_suite = parts.headers.remove("x-proxyzip-suite").is_some();
     let body = match body.collect().await {
         Ok(b) => b.to_bytes(),
         Err(e) => {
@@ -134,7 +136,7 @@ where
         port: target.port,
         path: &target.path,
     };
-    let plan = rules.plan(&info);
+    let plan = rules.plan_with(&info, conn.mock.as_deref());
     let record = settings.recording && rules.should_record(&info);
 
     let flow_id = record.then(|| {
@@ -152,7 +154,10 @@ where
         };
         let id = ctx.store.create(conn.peer.to_string(), request);
         let tls = conn.tls.clone();
-        let tags = plan.tags.clone();
+        let mut tags = plan.tags.clone();
+        if from_suite {
+            tags.push("suite".into());
+        }
         let graphql = graphql_label(&parts.headers, &body);
         ctx.store.update(id, |f| {
             f.tls = tls;
@@ -179,6 +184,9 @@ where
             return Ok(synthetic(&ctx.store, flow_id, code, headers, Bytes::from(text)));
         }
         Action::MapLocal(file) => return Ok(map_local(&ctx.store, flow_id, &file).await),
+        Action::Mock(hit) => {
+            return Ok(mock_response(&ctx.store, flow_id, &hit, &parts.headers, &target.path, &body).await);
+        }
     }
 
     // From here on the flow is "in flight"; the guard fails it if the client hangs up.
@@ -764,6 +772,56 @@ fn synthetic(
     *out.status_mut() = StatusCode::from_u16(status).unwrap_or(StatusCode::FORBIDDEN);
     *out.headers_mut() = to_header_map(&Headers(headers));
     out
+}
+
+/// Answer from a mock route: render the template, wait the configured delay and reply.
+async fn mock_response(
+    store: &FlowStore,
+    id: Option<FlowId>,
+    hit: &proxyzip_rules::MockMatch,
+    request_headers: &http::HeaderMap,
+    path: &str,
+    request_body: &Bytes,
+) -> Response<ProxyBody> {
+    use proxyzip_core::template::{TemplateContext, render};
+    let text = match &hit.body {
+        proxyzip_rules::MockBody::Inline { text } => Ok(text.clone()),
+        proxyzip_rules::MockBody::File { path } => tokio::fs::read_to_string(path)
+            .await
+            .map_err(|e| format!("ProxyZip mock: cannot read {}: {e}", path.display())),
+    };
+    let text = match text {
+        Ok(t) => t,
+        Err(message) => {
+            let headers = vec![
+                ("content-type".to_string(), "text/plain; charset=utf-8".to_string()),
+                ("x-proxyzip-rule".to_string(), "mock-error".to_string()),
+            ];
+            return synthetic(store, id, 500, headers, Bytes::from(message));
+        }
+    };
+    let mut headers: Vec<(String, String)> = hit.headers.clone();
+    let mut body = text;
+    if hit.template {
+        let (decoded, _, _) = proxyzip_codec::decode_content(&to_headers(request_headers), request_body);
+        let ctx = TemplateContext {
+            params: hit.params.clone(),
+            query: path.split_once('?').map(|(_, q)| proxyzip_codec::parse_query(q)).unwrap_or_default(),
+            headers: to_headers(request_headers).0,
+            body: serde_json::from_slice(&decoded).ok(),
+            vars: Default::default(),
+        };
+        body = render(&body, &ctx);
+        for (_, value) in headers.iter_mut() {
+            *value = render(value, &ctx);
+        }
+    }
+    headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-length"));
+    headers.push(("x-proxyzip-rule".to_string(), "mock".to_string()));
+    if hit.delay_ms > 0 {
+        tokio::time::sleep(Duration::from_millis(hit.delay_ms.min(60_000))).await;
+    }
+    synthetic(store, id, hit.status, headers, Bytes::from(body))
 }
 
 async fn map_local(store: &FlowStore, id: Option<FlowId>, file: &LocalFile) -> Response<ProxyBody> {
