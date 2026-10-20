@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ProxyZip: Free HTTP &amp; HTTPS debugging proxy for macOS, Windows, Linux</title>
+<meta name="description" content="Capture, inspect and change HTTP and HTTPS traffic. Open-source debugging proxy with mock servers, API tests, gRPC decoding and an MCP server.">
+<link rel="canonical" href="https://luispeixoto.github.io/ProxyZip/">
+<meta name="theme-color" content="#FAF9F5">
+<meta name="author" content="Luis Peixoto">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="ProxyZip">
+<meta property="og:title" content="ProxyZip: Open-source HTTP &amp; HTTPS debugging proxy">
+<meta property="og:description" content="See every request your app makes. Inspect HTTPS, pause and edit traffic, mock APIs, run tests. MIT licensed, written in Rust.">
+<meta property="og:url" content="https://luispeixoto.github.io/ProxyZip/">
+<meta property="og:image" content="https://luispeixoto.github.io/ProxyZip/og.png">
+<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="ProxyZip showing a captured JSON response in its inspector">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="ProxyZip: Open-source HTTP &amp; HTTPS debugging proxy">
+<meta name="twitter:description" content="See every request your app makes. Inspect HTTPS, pause and edit traffic, mock APIs, run tests.">
+<meta name="twitter:image" content="https://luispeixoto.github.io/ProxyZip/og.png">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="site.webmanifest">
+<link rel="preload" href="fonts/ibm-plex-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/ibm-plex-sans-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="images/hero.webp" as="image" type="image/webp" imagesrcset="images/hero-1200.webp 1200w, images/hero.webp 2400w" imagesizes="(min-width:1240px) 1160px, 92vw">
+<link rel="stylesheet" href="styles.css">
+<script>document.documentElement.classList.add("js")</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[
+{"@type":"SoftwareApplication","@id":"https://luispeixoto.github.io/ProxyZip/#app","name":"ProxyZip","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Windows, Linux","description":"Open-source HTTP and HTTPS debugging proxy. Capture and inspect traffic, pause and edit requests, mock APIs, replay test suites and expose traffic to AI assistants over MCP.","softwareVersion":"0.5.0","license":"https://opensource.org/licenses/MIT","url":"https://luispeixoto.github.io/ProxyZip/","downloadUrl":"https://github.com/LuisPeixoto/ProxyZip/releases/latest","codeRepository":"https://github.com/LuisPeixoto/ProxyZip","programmingLanguage":"Rust","image":"https://luispeixoto.github.io/ProxyZip/og.png","screenshot":"https://luispeixoto.github.io/ProxyZip/images/hero.webp","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"author":{"@type":"Person","name":"Luis Peixoto","url":"https://github.com/LuisPeixoto"}},
+{"@type":"WebSite","@id":"https://luispeixoto.github.io/ProxyZip/#site","url":"https://luispeixoto.github.io/ProxyZip/","name":"ProxyZip","inLanguage":"en"},
+{"@type":"FAQPage","mainEntity":[
+{"@type":"Question","name":"Is ProxyZip free?","acceptedAnswer":{"@type":"Answer","text":"Yes. ProxyZip is MIT licensed. There is no account, no paid tier and no telemetry."}},
+{"@type":"Question","name":"Can it inspect HTTPS traffic?","acceptedAnswer":{"@type":"Answer","text":"Yes. ProxyZip creates a local certificate authority on your machine. Once you trust it, the proxy can decrypt HTTPS from apps that use the system certificate store, and you can exclude hosts you never want decrypted."}},
+{"@type":"Question","name":"Does my traffic leave my computer?","acceptedAnswer":{"@type":"Answer","text":"No. Captured traffic stays on your machine. The CA private key never leaves your disk. The only network calls ProxyZip makes are the ones you proxy and an optional update check."}},
+{"@type":"Question","name":"Can I debug an iPhone or Android phone?","acceptedAnswer":{"@type":"Answer","text":"Yes. Point the phone's Wi-Fi proxy at your computer and install the certificate from http://proxyzip.cert. The Devices window shows the address and a QR code, and has scripts for Android emulators and iOS simulators."}},
+{"@type":"Question","name":"What is the difference between the app and the command line tool?","acceptedAnswer":{"@type":"Answer","text":"They run the same engine. The app adds the interface, breakpoints and plugins. The proxyzip command is for servers and CI: it captures, exports, serves OpenAPI mocks, validates traffic and runs replay suites with JUnit output."}},
+{"@type":"Question","name":"Does it support HTTP/3?","acceptedAnswer":{"@type":"Answer","text":"HTTP/1.1 and HTTP/2 are supported. HTTP/3 towards servers is available as an experimental option."}},
+{"@type":"Question","name":"Can I use it in CI?","acceptedAnswer":{"@type":"Answer","text":"Yes. proxyzip run executes a .pzsuite file, exits with a non-zero code on failure and can write a JUnit report. proxyzip validate checks captured traffic against an OpenAPI file."}}
+]}]}
+</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="./"><img src="favicon.svg" width="26" height="26" alt="">ProxyZip</a>
+    <nav aria-label="Main"><ul>
+      <li><a href="#features">Features</a></li>
+      <li><a href="docs/getting-started/">Docs</a></li>
+      <li><a href="https://github.com/LuisPeixoto/ProxyZip/blob/main/CHANGELOG.md">Changelog</a></li>
+      <li><a href="https://github.com/LuisPeixoto/ProxyZip">GitHub</a></li>
+    </ul></nav>
+    <span class="spacer"></span>
+    <a class="btn primary sm" href="#download">Download</a>
+  </div>
+</header>
+
+<main id="main">
+<div class="hero wrap">
+  <p class="eyebrow">HTTP &amp; HTTPS debugging proxy</p>
+  <h1>See every request your app makes.</h1>
+  <p class="lede">Capture HTTPS, pause a request and edit it, answer with a mock, replay a test suite. One small native app, and a command line for CI.</p>
+  <div class="cta">
+    <a class="btn primary" id="cta-main" href="#download">Download</a>
+    <a class="btn" href="https://github.com/LuisPeixoto/ProxyZip">View on GitHub</a>
+  </div>
+  <div class="install">
+    <span class="copy-line"><code>brew install --cask luispeixoto/proxyzip/proxyzip</code><button class="copy-btn" type="button" data-copy="brew install --cask luispeixoto/proxyzip/proxyzip" aria-label="Copy install command">copy</button></span>
+  </div>
+  <p class="meta"><span id="ver">v0.5.0</span><span>MIT</span><span>macOS · Windows · Linux</span><span>No account, no telemetry</span></p>
+
+  <figure class="shot">
+    <div class="frame"><img src="images/hero-1200.webp" srcset="images/hero-1200.webp 1200w, images/hero.webp 2400w" sizes="(min-width:1240px) 1160px, 92vw" width="2400" height="1260" fetchpriority="high" alt="ProxyZip window in light theme: a list of requests to api.shopwave.dev on the left and the JSON response of GET /v1/products/sku_1042 shown as a collapsible tree"></div>
+    <span class="pin" style="left:70%;top:6%">1</span><span class="pin" style="left:40%;top:63%">2</span><span class="pin" style="left:82%;top:76%">3</span>
+    <figcaption><span><b>1</b> Filter by text, method, status or host</span><span><b>2</b> Request and response side by side</span><span><b>3</b> JSON as a tree, with jq</span></figcaption>
+  </figure>
+</div>
+
+<section id="how" class="wrap">
+  <div class="sec-head"><span class="sec-num">01 — Capture</span><h2>Three steps, then forget it is there.</h2></div>
+  <div class="steps">
+    <div class="step reveal"><span class="n">1</span><h3>Trust the certificate</h3><p>ProxyZip makes a certificate authority on your machine. The key stays on your disk.</p><pre><code>proxyzip ca install</code></pre></div>
+    <div class="step reveal"><span class="n">2</span><h3>Send traffic through it</h3><p>Switch on the system proxy in the app, or set the variables for one terminal.</p><pre><code>eval "$(proxyzip env)"
+curl https://api.example.com</code></pre></div>
+    <div class="step reveal"><span class="n">3</span><h3>Use your app as usual</h3><p>Every request shows up as it finishes: headers, bodies, timings, TLS details.</p><pre><code>200 GET  api.example.com/v1/me  412B</code></pre></div>
+  </div>
+</section>
+
+<section id="features" class="wrap">
+  <div class="sec-head"><span class="sec-num">02 — Work with it</span><h2>Everything you do with traffic, in one place.</h2></div>
+
+  <div class="chapter">
+    <div class="txt reveal"><p class="k">Inspect</p><h3>Read a response the way you would read code.</h3>
+      <ul><li>JSON as a tree, with <code>jq</code> filters and a diff between any two requests</li><li>Protobuf, gRPC and gRPC-Web decoded without a schema</li><li>GraphQL operations named in the list</li><li>Copy as cURL, or generate code in 14 languages</li></ul>
+      <a class="more" href="features/grpc-protobuf/">gRPC and Protobuf</a></div>
+    <figure class="shot reveal"><div class="frame"><img loading="lazy" decoding="async" src="images/grpc-1200.webp" srcset="images/grpc-1200.webp 1200w, images/grpc.webp 2400w" sizes="(min-width:1240px) 760px, 92vw" width="2400" height="1350" alt="A gRPC-Web response decoded into numbered protobuf fields in the ProxyZip inspector"></div><figcaption>A gRPC-Web response, decoded into fields.</figcaption></figure>
+  </div>
+
+  <div class="chapter flip">
+    <div class="txt reveal"><p class="k">Change</p><h3>Pause a request, change the JSON, send it on.</h3>
+      <ul><li>Breakpoints on any request or response</li><li>Map Local and Map Remote, for files and other hosts</li><li>Rewrite headers, bodies and status codes by rule</li><li>Throttle to 3G, or block a host entirely</li></ul>
+      <a class="more" href="features/breakpoints-rewrite/">Breakpoints and rewrite</a></div>
+    <figure class="shot reveal"><div class="frame"><img loading="lazy" decoding="async" src="images/menu-1200.webp" srcset="images/menu-1200.webp 1200w, images/menu.webp 2400w" sizes="(min-width:1240px) 760px, 92vw" width="2400" height="1500" alt="Context menu on a request with Set breakpoint, Map Local, Map Remote, Block and Don't decrypt"></div><figcaption>Right-click a request: breakpoint, Map Local, Map Remote, block.</figcaption></figure>
+  </div>
+
+  <div class="chapter">
+    <div class="txt reveal"><p class="k">Mock &amp; test</p><h3>Build against an API that does not exist yet.</h3>
+      <ul><li>Mock servers with routes, delays, errors and a template language</li><li>Import an OpenAPI file, validate real traffic against it</li><li>Turn captured requests into a replay suite with assertions</li><li>Run suites headless in CI and read the JUnit report</li></ul>
+      <a class="more" href="features/mock-api-server/">Mock API server</a></div>
+    <figure class="shot reveal"><div class="frame"><img loading="lazy" decoding="async" src="images/mocks-1200.webp" srcset="images/mocks-1200.webp 1200w, images/mocks.webp 2090w" sizes="(min-width:1240px) 760px, 92vw" width="2090" height="1620" alt="The Mocks window listing routes of a mock server for api.shopwave.dev with status codes and delays"></div><figcaption>A mock server for a shop API: products, cart, checkout and a 502.</figcaption></figure>
+  </div>
+
+  <div class="chapter flip">
+    <div class="txt reveal"><p class="k">Run suites</p><h3>Select ten requests. Make them a test.</h3>
+      <ul><li>Add any selection to a suite with one click</li><li>Assert on status and body</li><li>Switch environments, pass values between steps with jq</li><li>Import a Postman collection</li></ul>
+      <a class="more" href="features/api-testing/">API testing</a></div>
+    <figure class="shot reveal"><div class="frame"><img loading="lazy" decoding="async" src="images/suites-1200.webp" srcset="images/suites-1200.webp 1200w, images/suites.webp 2090w" sizes="(min-width:1240px) 760px, 92vw" width="2090" height="1620" alt="A replay suite run showing ten requests passed"></div><figcaption>A suite run: 10 passed.</figcaption></figure>
+  </div>
+
+  <div class="chapter">
+    <div class="txt reveal"><p class="k">Script &amp; extend</p><h3>Small scripts, in a sandbox.</h3>
+      <ul><li>JavaScript hooks on requests and responses, with a test run in the editor</li><li>Plugins add viewers, rules and tabs to the inspector</li><li>QuickJS sandbox: no file, network or process access</li><li>A verified plugin catalog</li></ul>
+      <a class="more" href="docs/plugins/">Plugin guide</a></div>
+    <figure class="shot reveal"><div class="frame"><img loading="lazy" decoding="async" src="images/timeline-1200.webp" srcset="images/timeline-1200.webp 1200w, images/timeline.webp 2400w" sizes="(min-width:1240px) 760px, 92vw" width="2400" height="1140" alt="A Timeline tab added by a plugin to the response inspector"></div><figcaption>A plugin adds a Timeline tab to the inspector.</figcaption></figure>
+  </div>
+
+  <div class="chapter flip">
+    <div class="txt reveal"><p class="k">Devices</p><h3>Phones, emulators and your terminal.</h3>
+      <ul><li>QR code and address for a phone on the same Wi-Fi</li><li>Install the CA on an Android emulator or iOS simulator</li><li>Ready-made variables for Node, Python, Go, Java and more</li><li>SOCKS5 and reverse proxy listeners</li></ul>
+      <a class="more" href="features/mobile-debugging/">Mobile debugging</a></div>
+    <figure class="shot reveal"><div class="frame"><img loading="lazy" decoding="async" src="images/devices-1200.webp" srcset="images/devices-1200.webp 1200w, images/devices.webp 2060w" sizes="(min-width:1240px) 760px, 92vw" width="2060" height="1535" alt="The Devices and apps window with terminal and runtime environment variables"></div><figcaption>Devices &amp; apps: environment for every runtime.</figcaption></figure>
+  </div>
+
+  <div class="chapter">
+    <div class="txt reveal"><p class="k">AI assistants</p><h3>Let your assistant read the traffic.</h3>
+      <ul><li>Built-in MCP server, local only, behind a token</li><li>Secrets are redacted unless you say otherwise</li><li>Read-only by default; changes are opt-in</li><li>Works with any MCP client</li></ul>
+      <a class="more" href="features/ai-assistants-mcp/">MCP server</a></div>
+    <figure class="shot reveal"><div class="frame"><img loading="lazy" decoding="async" src="images/settings-1200.webp" srcset="images/settings-1200.webp 1200w, images/settings.webp 1460w" sizes="(min-width:1240px) 760px, 92vw" width="1460" height="1050" alt="Settings page for AI assistants with the MCP address and a masked token"></div><figcaption>Settings › AI assistants. The token is masked.</figcaption></figure>
+  </div>
+</section>
+
+<section id="cli" class="wrap">
+  <div class="sec-head"><span class="sec-num">03 — Command line</span><h2>The same engine, without a window.</h2></div>
+  <div class="cli-grid">
+    <div class="term reveal"><div class="term-bar"><i></i><i></i><i></i></div>
+<pre><code><span class="p">$</span> proxyzip start --port 19191 --rules rules.json
+⚡ ProxyZip listening on http://127.0.0.1:19191
+   Download on devices: http://proxyzip.cert (through the proxy)
+
+<span class="g">200</span> GET     https://api.shopwave.dev/v1/products 469B 1ms [mock]
+<span class="g">200</span> GET     https://api.shopwave.dev/v1/products/sku_1042 142B 70ms [mock]
+<span class="g">200</span> GET     https://api.shopwave.dev/v1/orders/ord_9 33B 0ms [mock]
+
+<span class="p">$</span> proxyzip run checkout.pzsuite --env staging --junit report.xml
+<span class="p">$</span> proxyzip validate api.yaml capture.pzsession
+<span class="p">$</span> proxyzip mock petstore.yaml --port 4010 --delay 200</code></pre></div>
+    <div class="list reveal"><ul class="cmds">
+      <li><code>start</code><span>Run the proxy and print each request</span></li>
+      <li><code>run</code><span>Execute a replay suite, exit 1 on failure</span></li>
+      <li><code>validate</code><span>Check traffic against an OpenAPI file</span></li>
+      <li><code>mock</code><span>Serve OpenAPI as a mock API</span></li>
+      <li><code>export</code><span>HAR, CSV, Postman or session files</span></li>
+      <li><code>code</code><span>Generate code for a captured request</span></li>
+      <li><code>env</code><span>Variables for a terminal or runtime</span></li>
+    </ul><p class="small"><a href="docs/cli/">Full command reference</a></p></div>
+  </div>
+</section>
+
+<section id="trust" class="wrap">
+  <div class="sec-head"><span class="sec-num">04 — Private and open</span><h2>You can check every claim here.</h2></div>
+  <div class="claims">
+    <div class="claim reveal"><h3>Your keys stay with you</h3><p>The certificate authority is generated on your machine. Its private key is never uploaded, and you can exclude any host from decryption.</p><a href="docs/certificates/">How certificates work</a></div>
+    <div class="claim reveal"><h3>No account, no telemetry</h3><p>Nothing to sign up for and nothing phoning home. The only extra request is an optional, signed update check.</p><a href="https://github.com/LuisPeixoto/ProxyZip/blob/main/SECURITY.md">Security policy</a></div>
+    <div class="claim reveal"><h3>MIT, in Rust</h3><p>The engine is Rust on tokio, hyper and rustls. The app is Tauri and Svelte. Read it, fork it, ship it.</p><a href="https://github.com/LuisPeixoto/ProxyZip/blob/main/LICENSE">License</a></div>
+  </div>
+</section>
+
+<section id="download" class="wrap">
+  <div class="sec-head"><span class="sec-num">05 — Download</span><h2>Install ProxyZip <span class="mono" id="ver2" style="font-weight:500">0.5.0</span>.</h2></div>
+  <div class="dl" id="dl">
+    <div class="os" data-os="mac"><h3>macOS</h3><p class="sub">Apple silicon and Intel</p>
+      <a class="file" data-pat="aarch64.dmg" href="https://github.com/LuisPeixoto/ProxyZip/releases/latest">ProxyZip_0.5.0_aarch64.dmg<small>Apple silicon</small></a>
+      <a class="file" data-pat="x64.dmg" href="https://github.com/LuisPeixoto/ProxyZip/releases/latest">ProxyZip_0.5.0_x64.dmg<small>Intel</small></a></div>
+    <div class="os" data-os="win"><h3>Windows</h3><p class="sub">Windows 10 and 11, 64-bit</p>
+      <a class="file" data-pat="x64-setup.exe" href="https://github.com/LuisPeixoto/ProxyZip/releases/latest">ProxyZip_0.5.0_x64-setup.exe<small>Installer</small></a>
+      <a class="file" data-pat=".msi" href="https://github.com/LuisPeixoto/ProxyZip/releases/latest">ProxyZip_0.5.0_x64_en-US.msi<small>MSI</small></a></div>
+    <div class="os" data-os="linux"><h3>Linux</h3><p class="sub">x86-64</p>
+      <a class="file" data-pat=".AppImage" href="https://github.com/LuisPeixoto/ProxyZip/releases/latest">ProxyZip_0.5.0_amd64.AppImage<small>AppImage</small></a>
+      <a class="file" data-pat=".deb" href="https://github.com/LuisPeixoto/ProxyZip/releases/latest">ProxyZip_0.5.0_amd64.deb<small>Debian, Ubuntu</small></a>
+      <a class="file" data-pat=".rpm" href="https://github.com/LuisPeixoto/ProxyZip/releases/latest">ProxyZip-0.5.0-1.x86_64.rpm<small>Fedora</small></a></div>
+  </div>
+  <div class="pkgs">
+    <div><p class="h5 sm4">Homebrew</p><span class="copy-line"><code>brew install --cask luispeixoto/proxyzip/proxyzip</code><button class="copy-btn" type="button" data-copy="brew install --cask luispeixoto/proxyzip/proxyzip" aria-label="Copy Homebrew command">copy</button></span></div>
+    <div><p class="h5 sm4">Scoop</p><span class="copy-line"><code>scoop bucket add proxyzip https://github.com/LuisPeixoto/scoop-proxyzip</code><button class="copy-btn" type="button" data-copy="scoop bucket add proxyzip https://github.com/LuisPeixoto/scoop-proxyzip" aria-label="Copy Scoop command">copy</button></span></div>
+    <div><p class="h5 sm4">Cargo (CLI)</p><span class="copy-line"><code>cargo install --git https://github.com/LuisPeixoto/ProxyZip proxyzip-cli</code><button class="copy-btn" type="button" data-copy="cargo install --git https://github.com/LuisPeixoto/ProxyZip proxyzip-cli" aria-label="Copy cargo command">copy</button></span></div>
+  </div>
+  <p class="small">Prebuilt command-line archives for macOS, Linux and Windows are on the <a href="https://github.com/LuisPeixoto/ProxyZip/releases/latest">release page</a>, with a <code>SHA256SUMS</code> file. See <a href="docs/distribution/">distribution</a> for signing and package managers.</p>
+</section>
+
+<section id="faq" class="wrap">
+  <div class="sec-head"><span class="sec-num">06 — Questions</span><h2>Frequently asked.</h2></div>
+  <div class="faq">
+    <details><summary>Is ProxyZip free?</summary><p>Yes. It is MIT licensed. There is no account, no paid tier and no telemetry.</p></details>
+    <details><summary>Can it inspect HTTPS traffic?</summary><p>Yes. ProxyZip creates a local certificate authority on your machine. Once you trust it, the proxy can decrypt HTTPS from apps that use the system certificate store, and you can exclude hosts you never want decrypted.</p></details>
+    <details><summary>Does my traffic leave my computer?</summary><p>No. Captured traffic stays on your machine and the CA private key never leaves your disk. The only network calls ProxyZip makes are the ones you proxy and an optional update check.</p></details>
+    <details><summary>Can I debug an iPhone or Android phone?</summary><p>Yes. Point the phone's Wi-Fi proxy at your computer and install the certificate from <code>http://proxyzip.cert</code>. The Devices window shows the address and a QR code. See <a href="features/mobile-debugging/">mobile debugging</a>.</p></details>
+    <details><summary>What is the difference between the app and the command line tool?</summary><p>They run the same engine. The app adds the interface, breakpoints and plugins. The <code>proxyzip</code> command is for servers and CI: it captures, exports, serves OpenAPI mocks, validates traffic and runs replay suites with JUnit output.</p></details>
+    <details><summary>Does it support HTTP/3?</summary><p>HTTP/1.1 and HTTP/2 are supported. HTTP/3 towards servers is available as an experimental option. See <a href="docs/http3/">HTTP/3</a>.</p></details>
+    <details><summary>Can I use it in CI?</summary><p>Yes. <code>proxyzip run</code> executes a <code>.pzsuite</code> file, exits non-zero on failure and can write a JUnit report. <code>proxyzip validate</code> checks captured traffic against an OpenAPI file.</p></details>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot">
+      <div class="about"><a class="brand" href="./" style="padding:0"><img src="favicon.svg" width="26" height="26" alt="">ProxyZip</a><p>An open-source HTTP and HTTPS debugging proxy for macOS, Windows and Linux. Made by Luis Peixoto.</p></div>
+      <nav aria-label="Product"><p class="h5">Product</p><a href="features/https-debugging/">HTTPS debugging</a><a href="features/mock-api-server/">Mock API server</a><a href="features/api-testing/">API testing</a><a href="features/grpc-protobuf/">gRPC</a></nav>
+      <nav aria-label="Learn"><p class="h5">Learn</p><a href="docs/getting-started/">Getting started</a><a href="docs/cli/">Command line</a><a href="docs/mcp/">MCP</a><a href="docs/troubleshooting/">Troubleshooting</a></nav>
+      <nav aria-label="Project"><p class="h5">Project</p><a href="https://github.com/LuisPeixoto/ProxyZip">GitHub</a><a href="https://github.com/LuisPeixoto/ProxyZip/blob/main/CHANGELOG.md">Changelog</a><a href="https://github.com/LuisPeixoto/ProxyZip/blob/main/SECURITY.md">Security</a><a href="https://github.com/LuisPeixoto/ProxyZip/blob/main/LICENSE">MIT license</a></nav>
+    </div>
+    <p class="legal">Use ProxyZip only on traffic you are allowed to inspect.</p>
+  </div>
+</footer>
+<script src="main.js" defer></script>
+</body>
+</html>
