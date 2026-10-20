@@ -19,6 +19,7 @@
 </p>
 
 <p align="center">
+  <a href="https://luispeixoto.github.io/ProxyZip/">Website</a> ·
   <a href="#install">Install</a> ·
   <a href="#features">Features</a> ·
   <a href="docs/getting-started.md">Getting started</a> ·
