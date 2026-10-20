@@ -1,6 +1,6 @@
 <script lang="ts">
   import { app, type Category } from "../stores/app.svelte";
-  import { exportCsv, exportHar, exportPostman, importHar, openSession, saveSession } from "../actions";
+  import { exportCsv, exportHar, exportPostman, exportWorkspace, importHar, importWorkspace, openSession, saveSession } from "../actions";
   import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
   import Icon from "./Icon.svelte";
 
@@ -33,6 +33,12 @@
         { label: `Export ${scopeLabel} as HAR…`, icon: "download", action: () => exportHar(scope) },
         { label: `Export ${scopeLabel} as CSV…`, icon: "file", action: () => exportCsv(scope) },
         { label: `Export ${scopeLabel} as Postman collection…`, icon: "send", action: () => exportPostman(scope) },
+        { separator: true },
+        { label: `Save ${scopeLabel} as a session without secrets…`, icon: "shield", action: () => saveSession(scope, true) },
+        { separator: true },
+        { label: "Export rules and settings as a workspace…", icon: "layers", action: () => exportWorkspace() },
+        { label: "Load a workspace (replace)…", icon: "upload", action: () => importWorkspace(false) },
+        { label: "Load a workspace (add to current)…", icon: "plus", action: () => importWorkspace(true) },
       ],
     };
   }
