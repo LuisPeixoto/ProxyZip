@@ -31,6 +31,11 @@ pub(crate) fn respond(path: &str, ctx: &Arc<Ctx>, host_header: Option<&str>) -> 
             .header("content-disposition", "attachment; filename=\"proxyzip-ca.crt\"")
             .body(full(ctx.ca.cert_der().to_vec()))
             .unwrap(),
+        "/ca.mobileconfig" => Response::builder()
+            .header("content-type", "application/x-apple-aspen-config")
+            .header("content-disposition", "attachment; filename=\"ProxyZip.mobileconfig\"")
+            .body(full(proxyzip_certinstall::ios::mobileconfig(ctx.ca.cert_der().as_ref())))
+            .unwrap(),
         "/proxy.pac" | "/proxy.pac.js" | "/wpad.dat" => Response::builder()
             .header("content-type", "application/x-ns-proxy-autoconfig")
             .body(full(pac_script(ctx, host_header)))
@@ -60,7 +65,7 @@ a.btn{display:inline-block;margin:8px 8px 0 0;padding:12px 18px;border-radius:10
 a.alt{background:#1c2130}code{background:#1c2130;padding:2px 6px;border-radius:6px}
 </style></head><body><main><h1>⚡ ProxyZip</h1>
 <p>Your traffic is flowing through ProxyZip. Install the root certificate on this device to inspect HTTPS.</p>
-<a class="btn" href="/ca.crt">Download certificate (.crt)</a><a class="btn alt" href="/ca.pem">PEM</a>
-<p><b>iOS:</b> Settings → General → VPN &amp; Device Management → install, then Settings → General → About → Certificate Trust Settings → enable full trust.<br>
+<a class="btn" href="/ca.crt">Download certificate (.crt)</a><a class="btn alt" href="/ca.mobileconfig">iOS profile</a><a class="btn alt" href="/ca.pem">PEM</a>
+<p><b>iOS:</b> tap <i>iOS profile</i>, allow it, install it in Settings → Profile Downloaded, then Settings → General → About → Certificate Trust Settings → enable full trust.<br>
 <b>Android:</b> Settings → Security → Encryption &amp; credentials → Install a certificate → CA certificate.</p>
 </main></body></html>"#;
