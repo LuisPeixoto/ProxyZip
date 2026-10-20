@@ -48,6 +48,8 @@ pub(crate) struct Conn {
     pub tls: Option<TlsInfo>,
     /// Set on reverse proxy listeners: every request goes to this target.
     pub reverse: Option<Arc<ReverseTarget>>,
+    /// Set on a mock server's own listener: only that server's routes answer.
+    pub mock: Option<Arc<str>>,
 }
 
 /// Where a reverse proxy listener sends its traffic.
@@ -87,6 +89,11 @@ enum ExtraListener {
         port: u16,
         target: String,
     },
+    /// A mock server's own port.
+    Mock {
+        port: u16,
+        server: String,
+    },
     Socks {
         port: u16,
     },
@@ -104,6 +111,9 @@ fn desired_listeners(rules: &RuleSet) -> Vec<ExtraListener> {
         if r.h3 {
             wanted.push(ExtraListener::ReverseH3 { port: r.listen_port, target: r.target.clone() });
         }
+    }
+    for (server, port) in rules.mock_listeners() {
+        wanted.push(ExtraListener::Mock { port, server: server.to_string() });
     }
     if rules.socks.enabled && rules.socks.port != 0 {
         wanted.push(ExtraListener::Socks { port: rules.socks.port });
@@ -222,7 +232,7 @@ impl ProxyServer {
 
 async fn handle_client(stream: TcpStream, peer: SocketAddr, ctx: Arc<Ctx>) {
     let _ = stream.set_nodelay(true);
-    let conn = Conn { peer, scheme: Scheme::Http, tunnel_target: None, tls: None, reverse: None };
+    let conn = Conn { peer, scheme: Scheme::Http, tunnel_target: None, tls: None, reverse: None, mock: None };
     serve_http(TokioIo::new(stream), ctx, conn).await;
 }
 
@@ -300,7 +310,12 @@ async fn spawn_extra(ctx: Arc<Ctx>, kind: ExtraListener) -> Result<Running, Stri
         let addr = SocketAddr::new(ctx.listen.ip(), *port);
         return crate::h3::serve_reverse(ctx, addr, target).await.map(|(shutdown, task)| Running { shutdown, task });
     }
+    let mock: Option<Arc<str>> = match &kind {
+        ExtraListener::Mock { server, .. } => Some(server.as_str().into()),
+        _ => None,
+    };
     let (port, label, reverse) = match &kind {
+        ExtraListener::Mock { port, server } => (*port, format!("mock server {server} on port {port}"), None),
         ExtraListener::Reverse { port, target } => {
             (*port, format!("reverse proxy on port {port}"), Some(Arc::new(ReverseTarget::parse(target)?)))
         }
@@ -318,6 +333,11 @@ async fn spawn_extra(ctx: Arc<Ctx>, kind: ExtraListener) -> Result<Running, Stri
                 accepted = listener.accept() => match accepted {
                     Ok((stream, peer)) => {
                         let ctx = ctx.clone();
+                        if let Some(name) = &mock {
+                            let name = name.clone();
+                            tokio::spawn(async move { handle_mock(stream, peer, ctx, name).await });
+                            continue;
+                        }
                         match &reverse {
                             Some(target) => {
                                 let target = target.clone();
@@ -339,8 +359,14 @@ async fn spawn_extra(ctx: Arc<Ctx>, kind: ExtraListener) -> Result<Running, Stri
     Ok(Running { shutdown: tx, task })
 }
 
+async fn handle_mock(stream: TcpStream, peer: SocketAddr, ctx: Arc<Ctx>, server: Arc<str>) {
+    let _ = stream.set_nodelay(true);
+    let conn = Conn { peer, scheme: Scheme::Http, tunnel_target: None, tls: None, reverse: None, mock: Some(server) };
+    serve_http(TokioIo::new(stream), ctx, conn).await;
+}
+
 async fn handle_reverse(stream: TcpStream, peer: SocketAddr, ctx: Arc<Ctx>, target: Arc<ReverseTarget>) {
     let _ = stream.set_nodelay(true);
-    let conn = Conn { peer, scheme: target.scheme, tunnel_target: None, tls: None, reverse: Some(target) };
+    let conn = Conn { peer, scheme: target.scheme, tunnel_target: None, tls: None, reverse: Some(target), mock: None };
     serve_http(TokioIo::new(stream), ctx, conn).await;
 }
