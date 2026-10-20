@@ -1,0 +1,32 @@
+# Flatpak manifest. It repackages the release's .deb; submit it to Flathub as described in docs/distribution.md.
+app-id: dev.proxyzip.app
+runtime: org.gnome.Platform
+runtime-version: "47"
+sdk: org.gnome.Sdk
+command: proxyzip-desktop
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --filesystem=xdg-download
+  - --talk-name=org.freedesktop.Notifications
+modules:
+  - name: proxyzip
+    buildsystem: simple
+    build-commands:
+      - ar x proxyzip.deb data.tar.gz
+      - tar -xzf data.tar.gz
+      - install -Dm755 usr/bin/proxyzip-desktop /app/bin/proxyzip-desktop
+      - install -Dm644 usr/share/applications/ProxyZip.desktop /app/share/applications/dev.proxyzip.app.desktop
+      - sed -i 's/^Icon=.*/Icon=dev.proxyzip.app/' /app/share/applications/dev.proxyzip.app.desktop
+      - install -Dm644 usr/share/icons/hicolor/128x128/apps/proxyzip-desktop.png /app/share/icons/hicolor/128x128/apps/dev.proxyzip.app.png
+      - install -Dm644 dev.proxyzip.app.metainfo.xml /app/share/metainfo/dev.proxyzip.app.metainfo.xml
+    sources:
+      - type: file
+        url: https://github.com/LuisPeixoto/ProxyZip/releases/download/v{{version}}/ProxyZip_{{version}}_amd64.deb
+        sha256: {{sha256:ProxyZip_{{version}}_amd64.deb}}
+        dest-filename: proxyzip.deb
+      - type: file
+        path: dev.proxyzip.app.metainfo.xml
