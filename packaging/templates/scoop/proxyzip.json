@@ -1,0 +1,23 @@
+{
+    "version": "{{version}}",
+    "description": "Command-line debugging proxy: capture, inspect and debug HTTP(S) traffic",
+    "homepage": "https://github.com/LuisPeixoto/ProxyZip",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/LuisPeixoto/ProxyZip/releases/download/v{{version}}/proxyzip-{{version}}-x86_64-pc-windows-msvc.zip",
+            "hash": "{{sha256:proxyzip-{{version}}-x86_64-pc-windows-msvc.zip}}",
+            "extract_dir": "proxyzip-{{version}}-x86_64-pc-windows-msvc"
+        }
+    },
+    "bin": "proxyzip.exe",
+    "checkver": "github",
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/LuisPeixoto/ProxyZip/releases/download/v$version/proxyzip-$version-x86_64-pc-windows-msvc.zip",
+                "extract_dir": "proxyzip-$version-x86_64-pc-windows-msvc"
+            }
+        }
+    }
+}
