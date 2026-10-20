@@ -24,10 +24,19 @@ server-sent events viewers · jq filters · Diff · code generation in 14 langua
 `.pzsession` sessions with recent and restore-on-launch · CSV and Postman export · `proxyzip export` and
 `proxyzip code`. See [Scripting](scripting.md), [Inspecting bodies](inspecting.md) and [Sessions](sessions.md).
 
-## Phase 4: Ecosystem
+## ✅ Phase 4: Ecosystem
 
-- [ ] Guided setup for physical iOS devices, the Android emulator, Java and Firefox
-- [ ] Terminal injection for Node.js, Python and Ruby without environment changes
-- [ ] **MCP server** so AI assistants can query captured traffic
-- [ ] Plugin API, auto-update, signed installers and package-manager distribution (Homebrew, Scoop, winget, Flathub)
-- [ ] HTTP/3 (QUIC) interception
+Guided setup for iPhone and iPad (profile and QR code), Android, Java and Firefox · terminal environment for every
+shell with a CA bundle and a Node.js preload · **MCP server** for AI assistants · plugin API · in-app updates ·
+release workflow with optional signing, command-line archives and package-manager manifests · HTTP/3: Alt-Svc
+handling, HTTP/3 to servers and an HTTP/3 reverse proxy. See [Devices](devices.md), [AI assistants](mcp.md),
+[Plugins](plugins.md), [HTTP/3](http3.md) and [Releasing](distribution.md).
+
+## Phase 5: Ideas
+
+- [ ] Publish the Homebrew tap, Scoop bucket, winget and Flathub packages
+- [ ] Verified, notarized installers once signing certificates are available
+- [ ] Decrypt QUIC captured system-wide (a packet-capture mode), not only through the proxy
+- [ ] Plugin marketplace and richer plugin UI (custom inspector tabs)
+- [ ] Mock servers and API-spec import (OpenAPI), request replay suites
+- [ ] Team features: shareable rule sets and sessions
