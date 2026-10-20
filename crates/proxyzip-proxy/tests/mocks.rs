@@ -195,6 +195,24 @@ async fn bodies_can_come_from_a_file() {
 }
 
 #[tokio::test]
+async fn binary_files_are_served_byte_for_byte() {
+    let dir = std::env::temp_dir().join(format!("pz-mock-bin-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("frame.bin");
+    let bytes: Vec<u8> = vec![0x00, 0x00, 0x00, 0x00, 0x05, 0xff, 0xfe, 0x80, 0x0a, 0x7b];
+    std::fs::write(&file, &bytes).unwrap();
+    let mut r = route("bin", "POST", "/frame", "");
+    r.body = MockBody::File { path: file };
+    r.template = true; // a binary file is never rendered
+    r.headers = vec![("content-type".into(), "application/octet-stream".into())];
+    let h = start(rules(server(vec![r]))).await;
+    let res = client(&h).post("http://api.mock/frame").send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    assert_eq!(res.bytes().await.unwrap().to_vec(), bytes);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
 async fn turning_the_tool_off_stops_mocking() {
     let upstream = real_upstream().await;
     let mut s = server(vec![route("any", "", "/**", "mocked")]);

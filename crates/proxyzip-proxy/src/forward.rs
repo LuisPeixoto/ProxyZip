@@ -784,13 +784,13 @@ async fn mock_response(
     request_body: &Bytes,
 ) -> Response<ProxyBody> {
     use proxyzip_core::template::{TemplateContext, render};
-    let text = match &hit.body {
-        proxyzip_rules::MockBody::Inline { text } => Ok(text.clone()),
-        proxyzip_rules::MockBody::File { path } => tokio::fs::read_to_string(path)
-            .await
-            .map_err(|e| format!("ProxyZip mock: cannot read {}: {e}", path.display())),
+    let bytes = match &hit.body {
+        proxyzip_rules::MockBody::Inline { text } => Ok(text.clone().into_bytes()),
+        proxyzip_rules::MockBody::File { path } => {
+            tokio::fs::read(path).await.map_err(|e| format!("ProxyZip mock: cannot read {}: {e}", path.display()))
+        }
     };
-    let text = match text {
+    let bytes = match bytes {
         Ok(t) => t,
         Err(message) => {
             let headers = vec![
@@ -801,8 +801,12 @@ async fn mock_response(
         }
     };
     let mut headers: Vec<(String, String)> = hit.headers.clone();
-    let mut body = text;
-    if hit.template {
+    // Only text is rendered as a template; a binary file (a gRPC frame, an image) is served as it is.
+    let mut body = Bytes::from(bytes);
+    if hit.template
+        && let Ok(text) = std::str::from_utf8(&body)
+    {
+        let text = text.to_string();
         let (decoded, _, _) = proxyzip_codec::decode_content(&to_headers(request_headers), request_body);
         let ctx = TemplateContext {
             params: hit.params.clone(),
@@ -811,7 +815,7 @@ async fn mock_response(
             body: serde_json::from_slice(&decoded).ok(),
             vars: Default::default(),
         };
-        body = render(&body, &ctx);
+        body = Bytes::from(render(&text, &ctx));
         for (_, value) in headers.iter_mut() {
             *value = render(value, &ctx);
         }
@@ -821,7 +825,7 @@ async fn mock_response(
     if hit.delay_ms > 0 {
         tokio::time::sleep(Duration::from_millis(hit.delay_ms.min(60_000))).await;
     }
-    synthetic(store, id, hit.status, headers, Bytes::from(body))
+    synthetic(store, id, hit.status, headers, body)
 }
 
 async fn map_local(store: &FlowStore, id: Option<FlowId>, file: &LocalFile) -> Response<ProxyBody> {
