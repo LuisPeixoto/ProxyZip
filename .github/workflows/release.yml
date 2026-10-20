@@ -90,7 +90,7 @@ jobs:
           $config = @{ bundle = @{ windows = @{ certificateThumbprint = $cert.Thumbprint; digestAlgorithm = "sha256"; timestampUrl = "http://timestamp.digicert.com" } } } | ConvertTo-Json -Depth 5
           Set-Content -Path apps/desktop/src-tauri/tauri.windows.conf.json -Value $config
           Write-Output "::notice::Windows signing is on"
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Signs the update packages the in-app updater verifies. Required for `latest.json`.
