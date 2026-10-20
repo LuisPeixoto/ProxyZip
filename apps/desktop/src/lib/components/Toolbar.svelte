@@ -91,6 +91,13 @@
     <Icon name="wrench" size={14} /> <span class="hidden xl:inline">Tools</span>
   </button>
   <button
+    onclick={() => (app.setupOpen = "computer")}
+    title="Set up devices, emulators, browsers and runtimes"
+    class="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium text-muted hover:bg-hover hover:text-fg"
+  >
+    <Icon name="smartphone" size={14} /> <span class="hidden xl:inline">Devices</span>
+  </button>
+  <button
     onclick={() => app.openComposer()}
     title="Compose a request (⌘N)"
     class="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium text-muted hover:bg-hover hover:text-fg"
