@@ -299,10 +299,10 @@ mod tests {
         let d = Path::new("/data/proxyzip");
         let s = render(Shell::Posix, "127.0.0.1", 9393, &d.join("proxyzip-ca.pem"), &files(d, false));
         assert!(s.contains("export HTTPS_PROXY='http://127.0.0.1:9393'"));
-        assert!(s.contains("export SSL_CERT_FILE='/data/proxyzip/runtime/ca-bundle.pem'"));
-        assert!(s.contains("export NODE_EXTRA_CA_CERTS='/data/proxyzip/proxyzip-ca.pem'"));
+        assert!(s.contains(&format!("export SSL_CERT_FILE='{}'", d.join("runtime/ca-bundle.pem").display())));
+        assert!(s.contains(&format!("export NODE_EXTRA_CA_CERTS='{}'", d.join("proxyzip-ca.pem").display())));
         assert!(s.contains("export NODE_USE_ENV_PROXY='1'"));
-        assert!(s.contains("--require \\\"/data/proxyzip/runtime/node-preload.cjs\\\""));
+        assert!(s.contains(&format!("--require \\\"{}\\\"", d.join("runtime/node-preload.cjs").display())));
         assert!(!s.contains("JAVA_TOOL_OPTIONS"), "no JDK, no Java options");
     }
 
@@ -311,7 +311,7 @@ mod tests {
         let d = Path::new("/data/proxyzip");
         let s = render(Shell::Posix, "127.0.0.1", 9393, &d.join("proxyzip-ca.pem"), &files(d, true));
         assert!(s.contains("-Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=9393"));
-        assert!(s.contains("-Djavax.net.ssl.trustStore=/data/proxyzip/runtime/java-truststore"));
+        assert!(s.contains(&format!("-Djavax.net.ssl.trustStore={}", d.join("runtime/java-truststore").display())));
         assert!(s.contains("trustStoreType=PKCS12"));
     }
 
