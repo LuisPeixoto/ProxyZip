@@ -7,6 +7,7 @@
 mod apply;
 mod engine;
 mod matcher;
+mod mock;
 mod model;
 
 pub use apply::{
@@ -15,4 +16,5 @@ pub use apply::{
 };
 pub use engine::{Action, LocalFile, Plan, Remap, RequestInfo, content_type_for};
 pub use matcher::{Matcher, wildcard_match};
+pub use mock::{MockMatch, MockOutcome, match_path};
 pub use model::*;

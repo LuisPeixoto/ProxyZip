@@ -45,6 +45,8 @@ pub enum Action {
     Forward,
     Block(BlockAction),
     MapLocal(LocalFile),
+    /// Answered by a mock server.
+    Mock(Box<crate::mock::MockMatch>),
 }
 
 /// Everything the proxy must do for one request.
@@ -86,7 +88,43 @@ impl RuleSet {
 
     /// Work out what to do with a request. The first matching rule of each tool wins.
     pub fn plan(&self, info: &RequestInfo) -> Plan {
+        self.plan_with(info, None)
+    }
+
+    /// Like [`plan`](Self::plan); `mock_server` names the mock server whose own listener received the request.
+    pub fn plan_with(&self, info: &RequestInfo, mock_server: Option<&str>) -> Plan {
+        use crate::mock::MockOutcome;
         let mut plan = Plan::default();
+
+        match self.mock_for(info, mock_server) {
+            MockOutcome::Hit(hit) => {
+                plan.action = Action::Mock(hit);
+                plan.tags.push("mock".into());
+                return plan;
+            }
+            MockOutcome::Miss { server, routes } => {
+                let body = serde_json::json!({
+                    "error": "no mock route matches this request",
+                    "server": server,
+                    "request": format!("{} {}", info.method, info.path),
+                    "routes": routes,
+                })
+                .to_string();
+                plan.action = Action::Mock(Box::new(crate::mock::MockMatch {
+                    server,
+                    route: String::new(),
+                    status: 404,
+                    headers: vec![("content-type".into(), "application/json".into())],
+                    body: crate::model::MockBody::Inline { text: body },
+                    template: false,
+                    delay_ms: 0,
+                    params: Default::default(),
+                }));
+                plan.tags.push("mock".into());
+                return plan;
+            }
+            MockOutcome::None => {}
+        }
 
         if self.tools.block
             && let Some(rule) = self.block.iter().find(|r| r.enabled && self.is_match(&r.matcher, info))

@@ -38,7 +38,14 @@ where
         }
     } else if looks_like_http(&prefix) {
         // Plain HTTP (or ws://) sent through a CONNECT tunnel.
-        let conn = Conn { peer, scheme: Scheme::Http, tunnel_target: Some((host, port)), tls: None, reverse: None };
+        let conn = Conn {
+            peer,
+            scheme: Scheme::Http,
+            tunnel_target: Some((host, port)),
+            tls: None,
+            reverse: None,
+            mock: None,
+        };
         serve_http(TokioIo::new(io), ctx, conn).await;
     } else {
         raw_tunnel(io, host, port, ctx, peer).await;
@@ -104,7 +111,14 @@ where
         version: session.protocol_version().map(|v| format!("{v:?}").replace('_', ".")),
         cipher: session.negotiated_cipher_suite().map(|c| format!("{:?}", c.suite())),
     };
-    let conn = Conn { peer, scheme: Scheme::Https, tunnel_target: Some((host, port)), tls: Some(info), reverse: None };
+    let conn = Conn {
+        peer,
+        scheme: Scheme::Https,
+        tunnel_target: Some((host, port)),
+        tls: Some(info),
+        reverse: None,
+        mock: None,
+    };
     serve_http(TokioIo::new(tls), ctx, conn).await;
 }
 
