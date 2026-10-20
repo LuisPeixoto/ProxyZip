@@ -1,0 +1,14 @@
+{
+  "id": "base64-viewer",
+  "name": "Base64 viewer",
+  "version": "1.0.0",
+  "description": "Decodes bodies that are Base64 text, and shows JSON inside them as a tree.",
+  "author": "ProxyZip",
+  "api": 2,
+  "contributes": {
+    "viewers": [{ "id": "base64", "name": "Base64", "content_types": ["application/x-base64", "text/base64", "application/base64"] }]
+  },
+  "settings": [
+    { "key": "parse_json", "label": "Show JSON as a tree", "type": "boolean", "default": true, "description": "When the decoded text is JSON, show it as JSON instead of text." }
+  ]
+}
