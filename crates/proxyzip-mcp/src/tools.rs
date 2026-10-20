@@ -52,6 +52,7 @@ pub fn definitions(state: &McpState) -> Vec<Value> {
                 "id": id,
                 "include_bodies": { "type": "boolean", "description": "Default true" },
                 "max_body_bytes": { "type": "integer", "description": "Truncate each body text to this many bytes (default 16384)" },
+                "redact": { "type": "boolean", "description": "Replace tokens, cookies and passwords with <redacted>. Default true; set false only when the user asks to see them" },
             }),
             &["id"],
             true,
@@ -62,6 +63,7 @@ pub fn definitions(state: &McpState) -> Vec<Value> {
             json!({
                 "text": { "type": "string" },
                 "in": { "type": "string", "enum": ["request", "response", "both"], "description": "Default both" },
+                "redact": { "type": "boolean", "description": "Search the redacted text (default true)" },
                 "filter": filter,
                 "limit": { "type": "integer", "description": "Default 20" },
             }),
@@ -89,7 +91,7 @@ pub fn definitions(state: &McpState) -> Vec<Value> {
         tool(
             "export_har",
             "Export requests as HAR 1.2 JSON (at most 200).",
-            json!({ "filter": filter, "ids": { "type": "array", "items": { "type": "integer" } } }),
+            json!({ "filter": filter, "ids": { "type": "array", "items": { "type": "integer" } }, "redact": { "type": "boolean", "description": "Default true" } }),
             &[],
             true,
         ),
@@ -173,7 +175,10 @@ async fn call_inner(state: &McpState, name: &str, args: &Value) -> Result<Value,
         }
         "get_flow" => {
             let id = flow_id(args)?;
-            let flow = state.store.get(id).ok_or_else(|| format!("no request with id {id}"))?;
+            let mut flow = state.store.get(id).ok_or_else(|| format!("no request with id {id}"))?;
+            if redact_requested(args) {
+                proxyzip_export::redact::redact_flow(&mut flow, &Default::default());
+            }
             let bodies = args.get("include_bodies").and_then(Value::as_bool).unwrap_or(true);
             let max = usize_arg(args, "max_body_bytes", DEFAULT_BODY_BYTES, MAX_BODY_BYTES);
             Ok(json_text(&flow_detail(&flow, bodies, max)))
@@ -191,7 +196,10 @@ async fn call_inner(state: &McpState, name: &str, args: &Value) -> Result<Value,
             for summary in
                 matching(state, args.get("filter").and_then(Value::as_str).unwrap_or("")).iter().rev().take(5000)
             {
-                let Some(flow) = state.store.get(summary.id) else { continue };
+                let Some(mut flow) = state.store.get(summary.id) else { continue };
+                if redact_requested(args) {
+                    proxyzip_export::redact::redact_flow(&mut flow, &Default::default());
+                }
                 let mut found = Vec::new();
                 if scope != "response"
                     && let Some(s) = snippet(&flow.request.headers, &flow.request.body, &needle)
@@ -217,7 +225,10 @@ async fn call_inner(state: &McpState, name: &str, args: &Value) -> Result<Value,
         }
         "query_body" => {
             let id = flow_id(args)?;
-            let flow = state.store.get(id).ok_or_else(|| format!("no request with id {id}"))?;
+            let mut flow = state.store.get(id).ok_or_else(|| format!("no request with id {id}"))?;
+            if redact_requested(args) {
+                proxyzip_export::redact::redact_flow(&mut flow, &Default::default());
+            }
             let expr = args.get("expr").and_then(Value::as_str).ok_or("missing `expr`")?;
             let (headers, body) = match args.get("part").and_then(Value::as_str) {
                 Some("request") => (&flow.request.headers, &flow.request.body),
@@ -256,6 +267,11 @@ async fn call_inner(state: &McpState, name: &str, args: &Value) -> Result<Value,
                         .collect();
                     state.store.get_many(&ids)
                 }
+            };
+            let flows = if redact_requested(args) {
+                proxyzip_export::redact::redacted(&flows, &Default::default())
+            } else {
+                flows
             };
             Ok(ok(proxyzip_export::har::export_json(&flows).map_err(|e| e.to_string())?))
         }
@@ -308,6 +324,11 @@ async fn call_inner(state: &McpState, name: &str, args: &Value) -> Result<Value,
         }
         other => Err(format!("unknown tool `{other}`")),
     }
+}
+
+/// Assistants get redacted data unless they ask otherwise.
+fn redact_requested(args: &Value) -> bool {
+    args.get("redact").and_then(Value::as_bool).unwrap_or(true)
 }
 
 fn require_changes(state: &McpState) -> Result<(), String> {
@@ -487,7 +508,8 @@ pub fn list_resources(state: &McpState) -> Value {
 pub fn read_resource(state: &McpState, uri: &str) -> Result<Value, String> {
     let id: FlowId =
         uri.strip_prefix("flow://").and_then(|s| s.parse().ok()).ok_or_else(|| format!("unknown resource {uri}"))?;
-    let flow = state.store.get(id).ok_or_else(|| format!("no request with id {id}"))?;
+    let mut flow = state.store.get(id).ok_or_else(|| format!("no request with id {id}"))?;
+    proxyzip_export::redact::redact_flow(&mut flow, &Default::default());
     let text = serde_json::to_string_pretty(&flow_detail(&flow, true, DEFAULT_BODY_BYTES)).unwrap_or_default();
     Ok(json!({ "contents": [{ "uri": uri, "mimeType": "application/json", "text": text }] }))
 }
