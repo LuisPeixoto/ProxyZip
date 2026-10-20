@@ -6,6 +6,12 @@
 //! | Windows | current-user Root store (`certutil -user -addstore`)          |
 //! | Linux   | system anchors (+`update-ca-*` via `pkexec`) and the NSS DB   |
 
+pub mod android;
+pub mod firefox;
+pub mod ios;
+pub mod runtime;
+pub mod terminal;
+
 use std::path::Path;
 use std::process::Command;
 
@@ -171,18 +177,14 @@ pub fn install_ios_simulator(cert_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Shell snippet that routes a terminal session through ProxyZip and makes common
-/// runtimes trust its CA.
+/// Shell snippet for the current shell that routes a terminal session through ProxyZip and makes common
+/// runtimes trust its CA. Generates the supporting files next to the CA.
 pub fn terminal_env(host: &str, port: u16, cert_path: &Path) -> String {
-    let proxy = format!("http://{host}:{port}");
-    let cert = cert_path.display();
-    if cfg!(windows) {
-        format!(
-            "$env:HTTP_PROXY=\"{proxy}\"; $env:HTTPS_PROXY=\"{proxy}\"; $env:NODE_EXTRA_CA_CERTS=\"{cert}\"; $env:CURL_CA_BUNDLE=\"{cert}\"; $env:REQUESTS_CA_BUNDLE=\"{cert}\"; $env:SSL_CERT_FILE=\"{cert}\""
-        )
-    } else {
-        format!(
-            "export HTTP_PROXY={proxy} HTTPS_PROXY={proxy} http_proxy={proxy} https_proxy={proxy} \\\n  NO_PROXY=localhost,127.0.0.1 \\\n  NODE_EXTRA_CA_CERTS='{cert}' CURL_CA_BUNDLE='{cert}' REQUESTS_CA_BUNDLE='{cert}' SSL_CERT_FILE='{cert}' DENO_CERT='{cert}'"
-        )
-    }
+    terminal_env_for(runtime::Shell::detect(), host, port, cert_path)
+}
+
+/// Like [`terminal_env`] for a specific shell.
+pub fn terminal_env_for(shell: runtime::Shell, host: &str, port: u16, cert_path: &Path) -> String {
+    runtime::terminal_env_for(shell, host, port, cert_path)
+        .unwrap_or_else(|e| format!("echo 'ProxyZip: could not prepare the environment: {e:#}' >&2"))
 }
