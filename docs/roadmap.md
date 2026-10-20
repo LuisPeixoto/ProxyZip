@@ -32,11 +32,19 @@ release workflow with optional signing, command-line archives and package-manage
 handling, HTTP/3 to servers and an HTTP/3 reverse proxy. See [Devices](devices.md), [AI assistants](mcp.md),
 [Plugins](plugins.md), [HTTP/3](http3.md) and [Releasing](distribution.md).
 
-## Phase 5: Ideas
+## ✅ Phase 5: Working with APIs
 
-- [ ] Publish the Homebrew tap, Scoop bucket, winget and Flathub packages
+Mock servers with templates, on a host or on their own port · OpenAPI import (mocks from a specification) and contract
+checks · replay suites with variables, assertions and JUnit reports, runnable from the app and in CI · Postman import ·
+workspaces and secret redaction · plugin API 2 (settings, inspector tabs) and a plugin catalog · a Homebrew tap and a
+Scoop bucket. See [Mocks](mocks.md), [Suites](suites.md), [Workspaces and secrets](workspaces.md) and [Plugins](plugins.md).
+
+## Phase 6: Ideas
+
+- [ ] Publish to winget and Flathub
 - [ ] Verified, notarized installers once signing certificates are available
 - [ ] Decrypt QUIC captured system-wide (a packet-capture mode), not only through the proxy
-- [ ] Plugin marketplace and richer plugin UI (custom inspector tabs)
-- [ ] Mock servers and API-spec import (OpenAPI), request replay suites
-- [ ] Team features: shareable rule sets and sessions
+- [ ] GraphQL and gRPC mocks, and mock record-and-replay (capture a session, serve it back)
+- [ ] Load and performance runs from a suite
+- [ ] Shared team workspaces with sync
+- [ ] Plugin signing and permissions

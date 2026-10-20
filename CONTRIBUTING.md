@@ -55,6 +55,11 @@ Tips:
 | Body decoding and viewers | `crates/proxyzip-codec/src` |
 | Scripting and plugins | `crates/proxyzip-script/src` |
 | MCP server | `crates/proxyzip-mcp/src` |
+| Mocks (matching, templates) | `crates/proxyzip-rules/src/mock.rs`, `crates/proxyzip-core/src/template.rs` |
+| OpenAPI | `crates/proxyzip-openapi/src` |
+| Replay suites | `crates/proxyzip-suite/src` |
+| Redaction and workspaces | `crates/proxyzip-export/src/{redact,workspace}.rs` |
+| Plugin catalog | `plugins` (run `python3 plugins/build_catalog.py` after a change) |
 | HTTP/3, Alt-Svc | `crates/proxyzip-proxy/src/{h3,altsvc}.rs` |
 | Packaging templates | `packaging` |
 | HAR, sessions, CSV, Postman, code generation | `crates/proxyzip-export/src` |

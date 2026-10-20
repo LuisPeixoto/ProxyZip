@@ -37,6 +37,13 @@ proxyzip start --mcp 9395 --mcp-allow-changes  # let assistants edit rules and c
 A running ProxyZip publishes its address and token in `mcp.json` in the data folder, which is how `proxyzip mcp` finds
 it without any configuration. The file is removed when ProxyZip exits.
 
+## Secrets stay hidden
+
+Assistants get **redacted** data by default: tokens, cookies, passwords and API keys become `<redacted>` in `get_flow`,
+`search_bodies`, `query_body` and `export_har`, and in the `flow://` resources. The tools take `redact: false` for the
+rare case where you ask the assistant to look at a raw value, but note that this sends the secret to the assistant's
+provider. See [Workspaces and secrets](workspaces.md#share-a-capture-remove-secrets) for what is removed.
+
 ## Tools
 
 | Tool | What it does |

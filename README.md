@@ -23,6 +23,8 @@
   <a href="#features">Features</a> ·
   <a href="docs/getting-started.md">Getting started</a> ·
   <a href="docs/scripting.md">Scripting</a> ·
+  <a href="docs/mocks.md">Mocks</a> ·
+  <a href="docs/suites.md">Suites</a> ·
   <a href="docs/mcp.md">AI assistants</a> ·
   <a href="docs/cli.md">CLI</a> ·
   <a href="docs/architecture.md">Architecture</a> ·
@@ -47,6 +49,9 @@ It ships as a native desktop app and as a scriptable command-line tool, and both
 - **Made to be understood.** JSON tree, **Protobuf, gRPC, GraphQL, MessagePack** and live **SSE** viewers, jq filters, Diff, timing breakdown, TLS details.
 - **Scriptable and extensible.** Change requests and responses with a few lines of JavaScript, or add viewers, hooks and “copy as” formats with [plugins](docs/plugins.md).
 - **Works with your AI assistant.** An [MCP server](docs/mcp.md) lets Claude Code, Cursor and VS Code list, search and explain your captures.
+- **Build against APIs that do not exist yet.** [Mock servers](docs/mocks.md) with templates, mocks generated from an OpenAPI file, and a check that your traffic matches the specification.
+- **Repeatable checks.** [Replay suites](docs/suites.md) with variables and assertions, run in the app or in CI.
+- **Safe to share.** [Workspaces](docs/workspaces.md) and captures with tokens, cookies and passwords removed.
 - **Every device.** Guided setup for iPhone and iPad, Android, Java, Firefox and any terminal, plus HTTP/2, [HTTP/3](docs/http3.md) and WebSocket.
 - **Zero-friction setup.** One click installs the certificate and routes your system through ProxyZip. One command
   does the same for a terminal.
@@ -166,6 +171,30 @@ Details and examples are in [Tools](docs/tools.md). The same rules work from the
 
 Details are in [Inspecting bodies](docs/inspecting.md) and [Sessions](docs/sessions.md).
 
+## Work with APIs
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>Mocks and contracts</h3>
+      <p>Answer requests with your own responses, on a host or on a port of their own, with templates such as
+      <code>{{params.id}}</code> and <code>{{uuid}}</code>. Import an OpenAPI file to get every route, or check what your app
+      really sent against the specification. <code>proxyzip mock</code> and <code>proxyzip validate</code> do the same in CI.
+      See <a href="docs/mocks.md">Mocks</a>.</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>Suites</h3>
+      <p>Select requests, right-click, <b>Add to a suite</b>. Add checks, pass a token from one request to the next, and run
+      it in the app or with <code>proxyzip run --junit report.xml</code>. Postman collections open as suites. See
+      <a href="docs/suites.md">Suites</a>.</p>
+    </td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/images/mocks.png" alt="The Mocks tool with an Orders API mock server" />
+</p>
+
 ## Connect anything
 
 <table>
@@ -199,8 +228,16 @@ Download the installer for your platform from the [latest release](https://githu
 
 ### Package managers
 
-Homebrew, Scoop and winget manifests are generated with every release (see [Releasing](docs/distribution.md)).
-Until the taps and buckets are published, use the installers above. The desktop app updates itself.
+```bash
+brew install --cask luispeixoto/proxyzip/proxyzip       # desktop app (macOS)
+brew install luispeixoto/proxyzip/proxyzip-cli          # command-line tool (macOS, Linux)
+
+scoop bucket add proxyzip https://github.com/LuisPeixoto/scoop-proxyzip
+scoop install proxyzip                                   # command-line tool (Windows)
+```
+
+They work once a release is published. A winget manifest is generated with every release too (see
+[Releasing](docs/distribution.md)). The desktop app updates itself.
 
 ### Build from source
 
@@ -271,6 +308,9 @@ Terms combine with AND. See [Filtering](docs/filtering.md) for the full referenc
 | [Getting started](docs/getting-started.md) | First capture on a computer, phone or emulator |
 | [Certificates](docs/certificates.md) | How the CA works and how to trust it on every platform |
 | [Tools](docs/tools.md) | Breakpoints, Map Local and Remote, Rewrite, Throttling and the rest, with the rules file format |
+| [Mocks](docs/mocks.md) | Mock servers, templates, OpenAPI import and contract checks |
+| [Suites](docs/suites.md) | Replay suites, assertions, Postman import and CI |
+| [Workspaces and secrets](docs/workspaces.md) | Share a setup, and remove secrets from captures |
 | [Devices](docs/devices.md) | iPhone, Android, Java, Firefox and terminal setup |
 | [AI assistants](docs/mcp.md) | The MCP server: setup for each client, tools and security |
 | [Plugins](docs/plugins.md) | Write hooks, viewers and “copy as” formats |
@@ -294,9 +334,11 @@ crates/
   proxyzip-tls          Root CA, per-host certificates, TLS key logging
   proxyzip-rules        Rule model and engine: block, map, rewrite, breakpoints, throttling, DNS and more
   proxyzip-script       QuickJS scripting and plugin runtime with time and memory limits
+  proxyzip-openapi      OpenAPI: mocks from a specification and contract checks
+  proxyzip-suite        Replay suites, assertions and reports
   proxyzip-mcp          MCP server for AI assistants
   proxyzip-codec        Content decoding, classification, and the Protobuf, gRPC, MessagePack, SSE, GraphQL and jq viewers
-  proxyzip-export       HAR, sessions, CSV, Postman and code generation
+  proxyzip-export       HAR, sessions, workspaces, CSV, Postman, code generation and secret redaction
   proxyzip-sysproxy     Operating-system proxy settings
   proxyzip-certinstall  Trust stores, Firefox, Android and Java setup, iOS profile, terminal environment
   proxyzip-cli          The `proxyzip` command
