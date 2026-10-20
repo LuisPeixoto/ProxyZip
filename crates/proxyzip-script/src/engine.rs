@@ -45,6 +45,8 @@ pub enum PluginEntry {
     Decode,
     /// `generate(request)`: turn a request into code.
     Generate,
+    /// `render(flow, tab)`: content for an inspector tab (plugin API 2).
+    Render,
 }
 
 /// The outcome of running a script, plus whatever it printed.
@@ -165,6 +167,7 @@ impl ScriptEngine {
         let phase = match entry {
             PluginEntry::Decode => "decode",
             PluginEntry::Generate => "generate",
+            PluginEntry::Render => "render",
         };
         let (value, logs) = self.run(source, phase, first, Some(second)).await;
         let verdict = value.map(|v| {
