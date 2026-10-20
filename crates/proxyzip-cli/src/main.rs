@@ -40,6 +40,31 @@ enum Command {
         host: String,
         #[arg(short, long, default_value_t = 9393)]
         port: u16,
+        /// Shell syntax: sh (bash, zsh), fish, powershell or cmd. Detected from the session by default.
+        #[arg(long)]
+        shell: Option<String>,
+    },
+    /// Open a new terminal window whose traffic goes through ProxyZip.
+    Terminal {
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        #[arg(short, long, default_value_t = 9393)]
+        port: u16,
+    },
+    /// Let an AI assistant inspect your traffic over MCP (stdio). Add it to Claude, Cursor, VS Code…
+    ///
+    /// Without options it forwards to a running ProxyZip (desktop app or `proxyzip start --mcp`).
+    /// With `--session` it serves a saved session instead, read-only.
+    Mcp {
+        /// Serve this `.pzsession` or `.har` file.
+        #[arg(long, value_name = "FILE")]
+        session: Option<PathBuf>,
+        /// Endpoint of a running ProxyZip. Found automatically by default.
+        #[arg(long)]
+        url: Option<String>,
+        /// Access token for `--url`.
+        #[arg(long, env = "PROXYZIP_MCP_TOKEN")]
+        token: Option<String>,
     },
     /// Print a HAR file's requests as cURL commands.
     HarToCurl { file: PathBuf },
@@ -133,6 +158,21 @@ struct StartArgs {
     /// Do not print flows.
     #[arg(short, long)]
     quiet: bool,
+    /// Also accept HTTP/3 (UDP) on the ports of every --reverse listener.
+    #[arg(long)]
+    reverse_h3: bool,
+    /// Use HTTP/3 towards servers that advertise it with Alt-Svc (experimental).
+    #[arg(long)]
+    http3: bool,
+    /// Do not remove HTTP/3 advertisements from responses (clients may then bypass the proxy with QUIC).
+    #[arg(long)]
+    keep_alt_svc: bool,
+    /// Serve an MCP endpoint for AI assistants on this local port (http://127.0.0.1:PORT/mcp, token required).
+    #[arg(long, value_name = "PORT")]
+    mcp: Option<u16>,
+    /// Let assistants change rules and clear traffic (needs --mcp).
+    #[arg(long, requires = "mcp")]
+    mcp_allow_changes: bool,
 }
 
 #[derive(Subcommand)]
@@ -151,6 +191,29 @@ enum CaAction {
     Regenerate,
     /// Install into the booted iOS Simulator(s) (macOS).
     IosSimulator,
+    /// Make Firefox trust ProxyZip in every profile found on this computer.
+    Firefox,
+    /// Set up an Android emulator or device: list devices, route its traffic, install the certificate.
+    Android {
+        /// Device serial (see `adb devices`). Required unless `--list` is used.
+        #[arg(long)]
+        serial: Option<String>,
+        /// List connected devices and exit.
+        #[arg(long)]
+        list: bool,
+        /// Send the device's HTTP traffic to this ProxyZip port.
+        #[arg(long, value_name = "PORT")]
+        proxy: Option<u16>,
+        /// Stop routing the device's traffic through ProxyZip.
+        #[arg(long)]
+        clear_proxy: bool,
+        /// Install the CA as a system certificate (emulators and rooted devices).
+        #[arg(long)]
+        system: bool,
+        /// Open Android's installer for a user certificate (any device).
+        #[arg(long)]
+        user: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -184,10 +247,24 @@ async fn main() -> Result<()> {
                 Ok(())
             }
         },
-        Command::Env { host, port } => {
+        Command::Env { host, port, shell } => {
             let ca = CertificateAuthority::load_or_create(&home)?;
-            println!("{}", proxyzip_certinstall::terminal_env(&host, port, &ca.cert_path().unwrap()));
+            let path = ca.cert_path().unwrap();
+            let snippet = match shell {
+                Some(name) => {
+                    let sh = proxyzip_certinstall::runtime::Shell::from_name(&name)
+                        .with_context(|| format!("unknown shell '{name}': use sh, fish, powershell or cmd"))?;
+                    proxyzip_certinstall::terminal_env_for(sh, &host, port, &path)
+                }
+                None => proxyzip_certinstall::terminal_env(&host, port, &path),
+            };
+            print!("{snippet}");
             Ok(())
+        }
+        Command::Mcp { session, url, token } => mcp(home, session, url, token).await,
+        Command::Terminal { host, port } => {
+            let ca = CertificateAuthority::load_or_create(&home)?;
+            proxyzip_certinstall::terminal::open(&host, port, &ca.cert_path().unwrap())
         }
         Command::Export(args) => export(args),
         Command::Code(args) => code(args),
@@ -227,15 +304,109 @@ fn ca(home: PathBuf, action: CaAction) -> Result<()> {
             proxyzip_certinstall::install_ios_simulator(&path)?;
             println!("Installed into booted iOS Simulator(s)");
         }
+        CaAction::Firefox => {
+            let report = proxyzip_certinstall::firefox::install(&path)?;
+            println!(
+                "Configured {} Firefox profile(s) ({} with the certificate imported)",
+                report.profiles.len(),
+                report.imported
+            );
+            for note in report.notes {
+                println!("{note}");
+            }
+        }
+        CaAction::Android { serial, list, proxy, clear_proxy, system, user } => {
+            use proxyzip_certinstall::android;
+            if list || serial.is_none() {
+                let devices = android::list_devices()?;
+                if devices.is_empty() {
+                    println!("No Android devices found. Start an emulator or connect a device with USB debugging.");
+                }
+                for d in devices {
+                    println!("{}\t{}\t{}", d.serial, d.state, d.model.unwrap_or_default());
+                }
+                return Ok(());
+            }
+            let serial = serial.unwrap();
+            if let Some(port) = proxy {
+                android::set_proxy(&serial, port)?;
+                println!("{serial} now sends HTTP traffic to ProxyZip on port {port}");
+            }
+            if clear_proxy {
+                android::clear_proxy(&serial)?;
+                println!("{serial} no longer uses a proxy");
+            }
+            if system {
+                let note = android::install_system_cert(&serial, &path, ca.cert_der().as_ref())?;
+                println!("{note}");
+            }
+            if user {
+                let der = std::env::temp_dir().join("proxyzip-ca.crt");
+                std::fs::write(&der, ca.cert_der().as_ref() as &[u8])?;
+                android::install_user_cert(&serial, &der)?;
+                println!("Opened the certificate installer on {serial}");
+            }
+        }
     }
     Ok(())
+}
+
+async fn mcp(home: PathBuf, session: Option<PathBuf>, url: Option<String>, token: Option<String>) -> Result<()> {
+    if let Some(path) = session {
+        let bytes = std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+        let flows = if path.extension().is_some_and(|e| e == "har") {
+            proxyzip_export::har::import(std::str::from_utf8(&bytes)?)?
+        } else {
+            proxyzip_export::session::read(&bytes)?
+        };
+        let store = FlowStore::default();
+        let count = flows.len();
+        for flow in flows {
+            store.import(flow);
+        }
+        let status =
+            serde_json::json!({ "running": false, "source": path.display().to_string(), "note": "read-only session" });
+        let state = proxyzip_mcp::McpState::new(store).with_status(move || status.clone());
+        eprintln!("ProxyZip MCP: serving {count} requests from {}", path.display());
+        return proxyzip_mcp::stdio::run(Arc::new(proxyzip_mcp::McpServer::new(Arc::new(state)))).await;
+    }
+    let endpoint = match (url, token) {
+        (Some(url), Some(token)) => proxyzip_mcp::discovery::Endpoint { url, token },
+        (Some(_), None) => anyhow::bail!("--url needs --token (or PROXYZIP_MCP_TOKEN)"),
+        _ => proxyzip_mcp::bridge::require_endpoint(&home)?,
+    };
+    proxyzip_mcp::bridge::run(endpoint).await
+}
+
+/// Changes to the rule set made by an assistant go through the running proxy.
+struct CliRules(Arc<proxyzip_proxy::ProxyHandle>);
+
+impl proxyzip_mcp::RulesBackend for CliRules {
+    fn get(&self) -> proxyzip_rules::RuleSet {
+        (*self.0.settings.read().rules).clone()
+    }
+
+    fn set<'a>(
+        &'a self,
+        rules: proxyzip_rules::RuleSet,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+        Box::pin(async move {
+            let errors = self.0.apply_rules(rules).await;
+            if errors.is_empty() { Ok(()) } else { Err(errors.join("; ")) }
+        })
+    }
 }
 
 async fn start(home: PathBuf, args: StartArgs) -> Result<()> {
     let ca = Arc::new(CertificateAuthority::load_or_create(&home)?);
     let store = FlowStore::default();
     let listen: SocketAddr = format!("{}:{}", args.host, args.port).parse().context("invalid listen address")?;
-    let mut settings = ProxySettings { insecure_upstream: args.insecure, ..Default::default() };
+    let mut settings = ProxySettings {
+        insecure_upstream: args.insecure,
+        http3_upstream: args.http3,
+        strip_alt_svc: !args.keep_alt_svc,
+        ..Default::default()
+    };
     settings.ssl.exclude = args.exclude.clone();
     if !args.include.is_empty() {
         settings.ssl.intercept_all = false;
@@ -243,14 +414,45 @@ async fn start(home: PathBuf, args: StartArgs) -> Result<()> {
     }
     settings.rules = Arc::new(build_rules(&args)?);
     let config = ProxyConfig { listen, keylog_path: args.keylog.clone(), ..Default::default() };
-    let handle = ProxyServer::start(config, settings, ca.clone(), store.clone()).await?;
+    let handle = Arc::new(ProxyServer::start(config, settings, ca.clone(), store.clone()).await?);
     let addr = handle.local_addr;
+    let mcp_http = match args.mcp {
+        Some(port) => {
+            let token = proxyzip_mcp::discovery::load_or_create_token(&home)?;
+            let status_handle = handle.clone();
+            let status_store = store.clone();
+            let state = proxyzip_mcp::McpState::new(store.clone())
+                .with_rules(Arc::new(CliRules(handle.clone())))
+                .with_status(move || {
+                    serde_json::json!({
+                        "running": true,
+                        "proxy": status_handle.local_addr.to_string(),
+                        "recording": status_handle.settings.read().recording,
+                        "flows": status_store.len(),
+                    })
+                })
+                .allow_changes(args.mcp_allow_changes);
+            let server = Arc::new(proxyzip_mcp::McpServer::new(Arc::new(state)));
+            let http =
+                proxyzip_mcp::http::serve(SocketAddr::from(([127, 0, 0, 1], port)), server, token.clone()).await?;
+            proxyzip_mcp::discovery::publish(&home, &proxyzip_mcp::discovery::Endpoint { url: http.url(), token })?;
+            Some(http)
+        }
+        None => None,
+    };
 
     let color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
     let paint = |code: &str, s: &str| if color { format!("\x1b[{code}m{s}\x1b[0m") } else { s.to_string() };
     eprintln!("{} listening on {}", paint("1;35", "⚡ ProxyZip"), paint("1", &format!("http://{addr}")));
     eprintln!("   CA certificate: {}", ca.cert_path().unwrap().display());
     eprintln!("   Download on devices: http://{} (through the proxy)", proxyzip_proxy::CERT_HOST);
+    if let Some(http) = &mcp_http {
+        eprintln!(
+            "   MCP for AI assistants on {} ({}). Add it with: proxyzip mcp",
+            http.url(),
+            if args.mcp_allow_changes { "changes allowed" } else { "read-only" }
+        );
+    }
     {
         let rules = handle.settings.read().rules.clone();
         if rules.socks.enabled {
@@ -320,7 +522,14 @@ async fn start(home: PathBuf, args: StartArgs) -> Result<()> {
     if system_proxy_on && let Err(e) = proxyzip_sysproxy::disable() {
         eprintln!("could not restore system proxy: {e:#}");
     }
-    handle.shutdown().await;
+    if let Some(http) = mcp_http {
+        http.shutdown();
+        proxyzip_mcp::discovery::unpublish(&home);
+    }
+    match Arc::try_unwrap(handle) {
+        Ok(h) => h.shutdown().await,
+        Err(_) => tracing::debug!("proxy handle still shared at exit"),
+    }
     if let Some(path) = args.har {
         let flows = store.all();
         std::fs::write(&path, proxyzip_export::har::export_json(&flows)?)?;
@@ -409,6 +618,7 @@ fn build_rules(args: &StartArgs) -> Result<RuleSet> {
             name: format!("CLI {listen_port}"),
             listen_port,
             target: target.trim().to_string(),
+            h3: args.reverse_h3,
             ..Default::default()
         });
     }
