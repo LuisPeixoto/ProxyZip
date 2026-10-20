@@ -1,0 +1,11 @@
+{
+  "id": "request-id",
+  "name": "Request ID",
+  "version": "1.0.0",
+  "description": "Adds an X-Request-Id header to every request that does not have one.",
+  "author": "ProxyZip",
+  "api": 1,
+  "contributes": {
+    "hooks": { "pattern": "", "request": true }
+  }
+}
