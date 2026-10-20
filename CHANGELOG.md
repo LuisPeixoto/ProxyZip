@@ -6,6 +6,35 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0]
+
+Working with APIs.
+
+### Added
+
+- **Mock servers**: answer requests from your own routes (`/users/:id`, `*`, `/files/**`) with status, headers, body,
+  delay and **templates** (`{{params.id}}`, `{{query.x}}`, `{{body.name}}`, `{{uuid}}`, `{{now}}`, `{{random_int 1 100}}`).
+  A mock can capture a host or have a port of its own. Right-click a response → **Create a mock from this response**.
+- **OpenAPI**: import a 3.0 or 3.1 file (YAML or JSON) as a mock server, with examples generated from the schemas, and
+  **check captured traffic against a specification**. `proxyzip mock` and `proxyzip validate` (which exits with 1 on a
+  violation) work in CI.
+- **Replay suites** (`.pzsuite`): ordered requests with variables, environments, checks (status, header, jq, body, duration,
+  OpenAPI) and values passed between requests. Build them from captured requests or a Postman collection, run them in the
+  app or with `proxyzip run --junit report.xml`.
+- **Workspaces** (`.pzworkspace`): rules, Protobuf descriptors, SSL lists and enabled plugins in one file, with credentials
+  hidden. `proxyzip start --workspace`.
+- **Secret redaction** for HAR, CSV, Postman and sessions (`--redact`, **Save without secrets**), and for everything sent
+  to AI assistants by default.
+- **Plugin API 2**: settings with a form in the app, tabs in the inspector, and a **plugin catalog** whose downloads are
+  verified with SHA-256. Three new plugins: Base64 viewer, Add header, Request timeline.
+- A Homebrew tap and a Scoop bucket, and a workflow that updates them when a release is published.
+
+### Changed
+
+- The example plugins moved to `plugins/` and became the catalog.
+- The desktop app now trusts the system's web roots for its own downloads (catalog).
+
+
 ## [0.4.0]
 
 Ecosystem.
