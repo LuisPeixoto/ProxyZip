@@ -171,6 +171,30 @@ async fn searches_queries_and_generates() {
 }
 
 #[tokio::test]
+async fn secrets_are_hidden_from_assistants_unless_they_ask() {
+    let store = FlowStore::new(10);
+    let id =
+        add(&store, "POST", "api.example.com", "/login?token=abc123", 200, r#"{"access_token":"s3cret","name":"ada"}"#);
+    store.update(id, |f| f.request.headers.push("authorization", "Bearer abc.def"));
+    let state = McpState::new(store);
+    let s = McpServer::new(Arc::new(state));
+
+    let (_, flow) = call(&s, "get_flow", json!({ "id": id })).await;
+    let text = flow.to_string();
+    assert!(!text.contains("s3cret") && !text.contains("abc123") && !text.contains("abc.def"), "{text}");
+    assert!(text.contains("<redacted>") && text.contains("ada"));
+
+    let (_, q) = call(&s, "query_body", json!({ "id": id, "part": "response", "expr": ".access_token" })).await;
+    assert_eq!(q["results"], json!(["<redacted>"]));
+
+    let (_, raw) = call(&s, "get_flow", json!({ "id": id, "redact": false })).await;
+    assert!(raw.to_string().contains("s3cret"));
+
+    let read = rpc(&s, "resources/read", json!({ "uri": format!("flow://{id}") })).await;
+    assert!(!read.to_string().contains("s3cret"), "resources are always redacted");
+}
+
+#[tokio::test]
 async fn resources_expose_each_flow() {
     let (s, _, _) = server(false);
     let list = rpc(&s, "resources/list", json!({})).await;
