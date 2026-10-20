@@ -4,7 +4,7 @@ members = ["crates/*", "apps/desktop/src-tauri"]
 default-members = ["crates/*"]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/LuisPeixoto/ProxyZip"
@@ -20,6 +20,7 @@ proxyzip-codec = { path = "crates/proxyzip-codec" }
 proxyzip-proxy = { path = "crates/proxyzip-proxy" }
 proxyzip-rules = { path = "crates/proxyzip-rules" }
 proxyzip-script = { path = "crates/proxyzip-script" }
+proxyzip-mcp = { path = "crates/proxyzip-mcp" }
 proxyzip-export = { path = "crates/proxyzip-export" }
 proxyzip-sysproxy = { path = "crates/proxyzip-sysproxy" }
 proxyzip-certinstall = { path = "crates/proxyzip-certinstall" }
