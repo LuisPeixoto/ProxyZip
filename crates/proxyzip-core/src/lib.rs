@@ -4,9 +4,11 @@
 //! connection was upgraded). Flows live in a [`FlowStore`], which broadcasts
 //! [`FlowEvent`]s so UIs and exporters can follow traffic live.
 
+mod filter;
 mod flow;
 mod store;
 
+pub use filter::Filter;
 pub use flow::*;
 pub use store::{FlowEvent, FlowStore};
 
