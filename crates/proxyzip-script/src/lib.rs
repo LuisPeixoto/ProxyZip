@@ -6,6 +6,7 @@
 //!
 //! See `docs/scripting.md` for the script API.
 
+pub mod catalog;
 mod convert;
 mod engine;
 pub mod plugin;
