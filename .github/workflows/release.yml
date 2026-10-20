@@ -33,7 +33,7 @@ jobs:
             args: ""
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.rust-target }}
@@ -120,7 +120,7 @@ jobs:
           - { target: x86_64-pc-windows-msvc, os: windows-latest, archive: zip }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -158,7 +158,7 @@ jobs:
     needs: [desktop, cli]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Render manifests from the release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
