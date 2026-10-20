@@ -41,6 +41,14 @@
     const ctx = { shared: JSON.parse(sharedJson) };
     const request = JSON.parse(requestJson);
     const response = responseJson ? JSON.parse(responseJson) : undefined;
+    if (phase === "decode" || phase === "generate") {
+      // Plugin entry points: `decode(body, info)` returns {format, json}; `generate(request)` returns text.
+      const entry = script[phase];
+      if (!entry) return JSON.stringify({ skipped: true, shared: ctx.shared });
+      const value = phase === "decode" ? entry(request, response) : entry(request);
+      if (value && typeof value.then === "function") throw new Error(`${phase} must return a value, not a Promise`);
+      return JSON.stringify({ result: value === undefined ? null : value, shared: ctx.shared });
+    }
     const fn = phase === "request" ? script.onRequest : script.onResponse;
     if (!fn) return JSON.stringify({ skipped: true, shared: ctx.shared });
     const out = phase === "request" ? fn(ctx, request) : fn(ctx, request, response);
