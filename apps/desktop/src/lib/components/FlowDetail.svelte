@@ -8,6 +8,7 @@
   import CodeView from "./CodeView.svelte";
   import Icon from "./Icon.svelte";
   import KeyValueTable from "./KeyValueTable.svelte";
+  import PluginTabView from "./PluginTabView.svelte";
   import TimingView from "./TimingView.svelte";
   import WsMessages from "./WsMessages.svelte";
 
@@ -186,6 +187,7 @@
             { id: "raw", label: "Raw" },
             { id: "timing", label: "Timing" },
             ...(d.logs.length ? [{ id: "console", label: "Console", badge: String(d.logs.length) }] : []),
+            ...d.plugin_tabs.map((t) => ({ id: `plugin:${t.plugin}:${t.id}`, label: t.name })),
             { id: "notes", label: "Notes", badge: d.comment ? "•" : "" },
           ],
           resTab,
@@ -212,6 +214,8 @@
                 </div>
               {/each}
             </div>
+          {:else if resTab.startsWith("plugin:")}
+            <PluginTabView flowId={s.id} tab={resTab} fingerprint={fingerprint} />
           {:else if resTab === "messages"}
             <WsMessages messages={d.ws_messages} />
           {:else if !d.response}
