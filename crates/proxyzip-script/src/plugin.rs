@@ -10,9 +10,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 /// The plugin API version this build understands.
-pub const API_VERSION: u32 = 1;
+pub const API_VERSION: u32 = 2;
 const MAX_SOURCE_BYTES: u64 = 256 * 1024;
 const MAX_PACKAGE_BYTES: u64 = 4 * 1024 * 1024;
 
@@ -49,15 +50,72 @@ fn text() -> String {
     "text".into()
 }
 
+/// An extra tab in the inspector, filled by the plugin's `render(flow)`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Tab {
+    pub id: String,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(default)]
 pub struct Contributes {
     pub hooks: Option<Hooks>,
     pub viewers: Vec<Viewer>,
     pub copy_as: Vec<CopyAs>,
+    /// Plugin API 2.
+    pub tabs: Vec<Tab>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SettingType {
+    #[default]
+    String,
+    Number,
+    Boolean,
+    Select,
+}
+
+/// A value the user can set for a plugin (plugin API 2). The plugin reads it as `plugin.settings.<key>`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Setting {
+    pub key: String,
+    pub label: String,
+    #[serde(default, rename = "type")]
+    pub kind: SettingType,
+    #[serde(default)]
+    pub default: Option<Value>,
+    /// The choices of a `select`.
+    #[serde(default)]
+    pub options: Vec<String>,
+    #[serde(default)]
+    pub description: String,
+}
+
+impl Setting {
+    /// The value to use when the user has not set one.
+    fn fallback(&self) -> Value {
+        self.default.clone().unwrap_or(match self.kind {
+            SettingType::String => Value::String(String::new()),
+            SettingType::Number => Value::from(0),
+            SettingType::Boolean => Value::Bool(false),
+            SettingType::Select => self.options.first().map(|o| Value::String(o.clone())).unwrap_or(Value::Null),
+        })
+    }
+
+    /// Check a user-supplied value against the declared type.
+    fn accept(&self, value: &Value) -> Result<Value> {
+        match (self.kind, value) {
+            (SettingType::String, Value::String(_)) | (SettingType::Boolean, Value::Bool(_)) => Ok(value.clone()),
+            (SettingType::Number, Value::Number(_)) => Ok(value.clone()),
+            (SettingType::Select, Value::String(s)) if self.options.contains(s) => Ok(value.clone()),
+            _ => bail!("the value of {:?} does not fit its type ({:?})", self.key, self.kind),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Manifest {
     pub id: String,
     pub name: String,
@@ -71,6 +129,8 @@ pub struct Manifest {
     pub api: u32,
     #[serde(default)]
     pub contributes: Contributes,
+    #[serde(default)]
+    pub settings: Vec<Setting>,
 }
 
 fn one() -> u32 {
@@ -108,6 +168,24 @@ impl Manifest {
                 bail!("viewer and copyAs ids must be unique and use only a-z, 0-9, '.', '_' and '-' (got {id:?})");
             }
         }
+        let mut keys = BTreeSet::new();
+        for setting in &self.settings {
+            if !ok_id(&setting.key.to_ascii_lowercase().replace('-', "_")) || !keys.insert(setting.key.clone()) {
+                bail!(
+                    "setting keys must be unique and use only letters, digits, '.', '_' and '-' (got {:?})",
+                    setting.key
+                );
+            }
+            if setting.kind == SettingType::Select && setting.options.is_empty() {
+                bail!("the select setting {:?} needs `options`", setting.key);
+            }
+        }
+        let mut tab_ids = BTreeSet::new();
+        for tab in &self.contributes.tabs {
+            if !ok_id(&tab.id) || !tab_ids.insert(tab.id.clone()) {
+                bail!("tab ids must be unique and use only a-z, 0-9, '.', '_' and '-' (got {:?})", tab.id);
+            }
+        }
         if let Some(h) = &self.contributes.hooks {
             if !h.request && !h.response {
                 bail!("hooks must enable `request` or `response`");
@@ -125,6 +203,8 @@ pub struct Plugin {
     #[serde(flatten)]
     pub manifest: Manifest,
     pub enabled: bool,
+    /// Current setting values (defaults filled in).
+    pub values: Map<String, Value>,
     #[serde(skip)]
     pub source: String,
     #[serde(skip)]
@@ -157,6 +237,30 @@ pub struct Registry {
 struct State {
     #[serde(default)]
     disabled: BTreeSet<String>,
+    /// Values the user set, per plugin.
+    #[serde(default)]
+    settings: std::collections::BTreeMap<String, Map<String, Value>>,
+}
+
+/// The saved values merged over the defaults; values that no longer fit the manifest are dropped.
+fn effective_values(manifest: &Manifest, saved: Option<&Map<String, Value>>) -> Map<String, Value> {
+    let mut out = Map::new();
+    for setting in &manifest.settings {
+        let value = saved
+            .and_then(|m| m.get(&setting.key))
+            .and_then(|v| setting.accept(v).ok())
+            .unwrap_or_else(|| setting.fallback());
+        out.insert(setting.key.clone(), value);
+    }
+    out
+}
+
+impl Plugin {
+    /// The code to run: the plugin's own `plugin` object (its id and settings), then `main.js`.
+    pub fn runtime_source(&self) -> String {
+        let info = serde_json::json!({ "id": self.manifest.id, "name": self.manifest.name, "version": self.manifest.version, "settings": self.values });
+        format!("var plugin = Object.freeze({info});\n{}", self.source)
+    }
 }
 
 impl Registry {
@@ -175,7 +279,8 @@ impl Registry {
             match read_plugin(&folder) {
                 Ok((manifest, source)) => {
                     let enabled = !state.disabled.contains(&manifest.id);
-                    reg.plugins.push(Plugin { manifest, enabled, source, dir: folder });
+                    let values = effective_values(&manifest, state.settings.get(&manifest.id));
+                    reg.plugins.push(Plugin { manifest, enabled, values, source, dir: folder });
                 }
                 Err(e) => reg.errors.push(LoadError { folder: name, message: format!("{e:#}") }),
             }
@@ -184,8 +289,15 @@ impl Registry {
     }
 
     fn save_state(&self) -> Result<()> {
-        let state =
-            State { disabled: self.plugins.iter().filter(|p| !p.enabled).map(|p| p.manifest.id.clone()).collect() };
+        let state = State {
+            disabled: self.plugins.iter().filter(|p| !p.enabled).map(|p| p.manifest.id.clone()).collect(),
+            settings: self
+                .plugins
+                .iter()
+                .filter(|p| !p.values.is_empty())
+                .map(|p| (p.manifest.id.clone(), p.values.clone()))
+                .collect(),
+        };
         std::fs::create_dir_all(&self.dir)?;
         std::fs::write(self.dir.join("state.json"), serde_json::to_string_pretty(&state)?)?;
         Ok(())
@@ -231,6 +343,19 @@ impl Registry {
         self.save_state()
     }
 
+    /// Save the values of a plugin's settings. Unknown keys are ignored; a value of the wrong type is an error.
+    pub fn set_settings(&mut self, id: &str, values: &Map<String, Value>) -> Result<()> {
+        let p = self.plugins.iter_mut().find(|p| p.manifest.id == id).with_context(|| format!("no plugin {id}"))?;
+        let mut next = p.values.clone();
+        for setting in &p.manifest.settings {
+            if let Some(v) = values.get(&setting.key) {
+                next.insert(setting.key.clone(), setting.accept(v)?);
+            }
+        }
+        p.values = next;
+        self.save_state()
+    }
+
     pub fn remove(&mut self, id: &str) -> Result<()> {
         let at = self.plugins.iter().position(|p| p.manifest.id == id).with_context(|| format!("no plugin {id}"))?;
         let p = self.plugins.remove(at);
@@ -248,7 +373,7 @@ impl Registry {
                 p.manifest.contributes.hooks.clone().map(|hooks| HookSpec {
                     plugin_id: p.manifest.id.clone(),
                     name: p.manifest.name.clone(),
-                    source: p.source.clone(),
+                    source: p.runtime_source(),
                     hooks,
                 })
             })
@@ -267,6 +392,16 @@ impl Registry {
                 .filter(move |v| v.content_types.iter().any(|t| ct.contains(&t.to_ascii_lowercase())))
                 .map(move |v| (p, v))
         })
+    }
+
+    /// Enabled plugin tabs for the inspector.
+    pub fn tabs(&self) -> Vec<(&Plugin, &Tab)> {
+        self.enabled().flat_map(|p| p.manifest.contributes.tabs.iter().map(move |t| (p, t))).collect()
+    }
+
+    pub fn find_tab(&self, plugin: &str, tab: &str) -> Option<&Plugin> {
+        let p = self.enabled().find(|p| p.manifest.id == plugin)?;
+        p.manifest.contributes.tabs.iter().any(|t| t.id == tab).then_some(p)
     }
 
     pub fn find_copy_as(&self, plugin: &str, id: &str) -> Option<(&Plugin, &CopyAs)> {
