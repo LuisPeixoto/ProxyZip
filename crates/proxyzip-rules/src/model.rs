@@ -23,6 +23,7 @@ pub struct ToolToggles {
     pub scripts: bool,
     pub dns: bool,
     pub reverse: bool,
+    pub mocks: bool,
 }
 
 impl Default for ToolToggles {
@@ -36,6 +37,7 @@ impl Default for ToolToggles {
             scripts: true,
             dns: true,
             reverse: true,
+            mocks: true,
         }
     }
 }
@@ -52,6 +54,7 @@ pub struct RuleSet {
     pub rewrite: Vec<RewriteRule>,
     pub breakpoints: Vec<BreakpointRule>,
     pub scripts: Vec<ScriptRule>,
+    pub mocks: Vec<MockServer>,
     pub proto_mappings: Vec<ProtoMapping>,
     pub throttle: Throttle,
     pub dns: Vec<DnsRule>,
@@ -501,6 +504,82 @@ mod tests {
         assert_eq!(ThrottleProfile::default().download_bytes_per_sec(), None);
         for p in ThrottleProfile::PRESETS {
             assert!(ThrottleProfile::preset(p).is_some());
+        }
+    }
+}
+
+/// Where the body of a mock response comes from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum MockBody {
+    Inline { text: String },
+    File { path: PathBuf },
+}
+
+impl Default for MockBody {
+    fn default() -> Self {
+        MockBody::Inline { text: String::new() }
+    }
+}
+
+/// One answer a mock server can give.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MockRoute {
+    pub name: String,
+    pub enabled: bool,
+    /// `GET`, `POST`, … Empty or `ANY` matches every method.
+    pub method: String,
+    /// `/users/:id`, `/files/*` (one segment) or `/static/**` (the rest). The query string is ignored.
+    pub path: String,
+    pub status: u16,
+    pub headers: Vec<(String, String)>,
+    pub body: MockBody,
+    /// Fill `{{params.id}}`, `{{body.name}}`, `{{uuid}}` and friends in the body and header values.
+    pub template: bool,
+    pub delay_ms: u64,
+}
+
+impl Default for MockRoute {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            enabled: true,
+            method: String::new(),
+            path: "/".into(),
+            status: 200,
+            headers: vec![("content-type".into(), "application/json".into())],
+            body: MockBody::default(),
+            template: false,
+            delay_ms: 0,
+        }
+    }
+}
+
+/// A set of routes answered by ProxyZip instead of a real server.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MockServer {
+    pub name: String,
+    pub enabled: bool,
+    /// Requests to this host (wildcards allowed) are answered by the mock. Empty means only the own listener.
+    pub host: String,
+    /// Also listen on this local port, so an app can call `http://localhost:PORT` without any proxy setting.
+    pub listen_port: Option<u16>,
+    /// Send requests that match no route to the real server (otherwise they get a 404 that lists the routes).
+    pub passthrough: bool,
+    pub routes: Vec<MockRoute>,
+}
+
+impl Default for MockServer {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            enabled: true,
+            host: String::new(),
+            listen_port: None,
+            passthrough: false,
+            routes: Vec::new(),
         }
     }
 }
