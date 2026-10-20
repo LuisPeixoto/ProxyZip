@@ -37,6 +37,8 @@ proxyzip start --exclude '*.apple.com' --filter '*api*' --verbose
 | `--upstream-proxy <URL>` | Chain through another proxy: `http://[user:pass@]host:port` or `socks5://[user:pass@]host:port`. |
 | `--reverse <PORT=URL>` | Expose a server on a local port, e.g. `8081=https://api.example.com`. Repeatable. |
 | `--throttle <PRESET>` | Simulate a slow network: `edge`, `3g`, `4g` or `wifi-poor`. |
+| `--workspace <FILE>` | Add the rules of a `.pzworkspace` file. |
+| `--redact` | Remove secrets from what `--har` and `--save` write. |
 | `--http3` | Use [HTTP/3](http3.md) towards servers that advertise it (experimental). |
 | `--keep-alt-svc` | Do not hide HTTP/3 offers from clients. |
 | `--reverse-h3` | Also accept HTTP/3 on the UDP port of every `--reverse` listener. |
@@ -68,6 +70,7 @@ proxyzip export capture.har -f session -o capture.pzsession
 |--------|-------------|
 | `-f, --format <FORMAT>` | `csv`, `postman`, `har` or `session`. |
 | `-o, --output <FILE>` | Write to a file instead of standard output. Required for `session`. |
+| `--redact` | Replace secrets (tokens, cookies, passwords) before writing. See [Workspaces and secrets](workspaces.md). |
 
 ## `proxyzip code`
 
@@ -81,6 +84,37 @@ proxyzip code session.pzsession --lang python --number 3
 |--------|-------------|
 | `-l, --lang <LANG>` | `curl`, `httpie`, `powershell`, `python`, `javascript`, `node-axios`, `go`, `rust`, `java`, `kotlin`, `swift`, `csharp`, `php` or `ruby`. Default `curl`. |
 | `-n, --number <N>` | Which request to use; 1 is the first. |
+
+## `proxyzip mock`
+
+Serves an OpenAPI 3 file, or the mock servers of a workspace, as a mock API. See [Mocks](mocks.md).
+
+```bash
+proxyzip mock petstore.yaml --port 4010 --delay 200
+```
+
+| Option | Description |
+|--------|-------------|
+| `-p, --port <PORT>` | Port to serve on (default 4010) |
+| `--host <ADDR>` | Address to listen on (default `127.0.0.1`) |
+| `--delay <MS>` | Wait before every answer |
+
+## `proxyzip validate`
+
+Checks captured traffic against an OpenAPI file and exits with `1` if anything does not conform.
+
+```bash
+proxyzip validate api.yaml capture.pzsession
+proxyzip validate api.yaml capture.har --json
+```
+
+## `proxyzip run`
+
+Runs a [replay suite](suites.md) or a Postman collection. Exits with `1` when a request fails.
+
+```bash
+proxyzip run checkout.pzsuite --env staging --junit report.xml
+```
 
 ## `proxyzip ca`
 
