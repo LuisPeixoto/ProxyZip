@@ -1,0 +1,12 @@
+{
+  "id": "jwt-viewer",
+  "name": "JWT viewer",
+  "version": "1.0.0",
+  "description": "Decodes JSON Web Tokens in bodies, and adds a Markdown bug-report format to Code.",
+  "author": "ProxyZip",
+  "api": 1,
+  "contributes": {
+    "viewers": [{ "id": "jwt", "name": "JWT", "content_types": ["application/jwt"] }],
+    "copy_as": [{ "id": "markdown", "name": "Markdown", "syntax": "text" }]
+  }
+}
