@@ -49,11 +49,14 @@ curl -x http://127.0.0.1:9393 --cacert "$(proxyzip ca path)" https://example.com
 
 ### A phone, tablet or emulator
 
+The **Devices** window in the toolbar walks you through iPhone and iPad (with a QR code), the iOS Simulator, Android
+emulators and devices, Java and Firefox. See [Devices, browsers and runtimes](devices.md). The manual steps are:
+
 1. In **Settings → Proxy**, enable **Allow LAN connections**.
 2. On the device, open the Wi-Fi settings and set an HTTP proxy to your computer's address and port 9393.
    The first-run screen shows your address.
 3. On the device, open `http://proxyzip.cert` and install the certificate.
-   - **iOS:** install the downloaded profile, then enable it under
+   - **iOS:** tap **iOS profile** to install it, then enable it under
      *Settings → General → About → Certificate Trust Settings*.
    - **Android:** *Settings → Security → Encryption & credentials → Install a certificate → CA certificate*.
      Note that Android 7 and newer apps only trust user certificates if they opt in.
@@ -72,6 +75,7 @@ curl -x http://127.0.0.1:9393 --cacert "$(proxyzip ca path)" https://example.com
 
 ## Next steps
 
+- [Devices, browsers and runtimes](devices.md)
 - [Certificates](certificates.md)
 - [Filtering](filtering.md)
 - [Troubleshooting](troubleshooting.md)
