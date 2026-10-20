@@ -339,6 +339,20 @@ async fn serves_certificate_page() {
 }
 
 #[tokio::test]
+async fn serves_ios_profile() {
+    let h = start_proxy(None).await;
+    let c =
+        reqwest::Client::builder().proxy(reqwest::Proxy::http(format!("http://{}", h.proxy)).unwrap()).build().unwrap();
+    let res = c.get("http://proxyzip.cert/ca.mobileconfig").send().await.unwrap();
+    assert_eq!(res.headers()["content-type"], "application/x-apple-aspen-config");
+    let body = res.text().await.unwrap();
+    assert!(body.contains("com.apple.security.root"));
+    let der_b64 = base64::engine::general_purpose::STANDARD.encode(h.ca.cert_der().as_ref() as &[u8]);
+    assert!(body.contains(&der_b64), "the profile embeds the CA");
+    assert!(h.store.is_empty());
+}
+
+#[tokio::test]
 async fn client_abort_marks_flow_failed() {
     // Upstream accepts but never answers.
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -368,6 +382,11 @@ async fn client_abort_marks_flow_failed() {
 
 fn set_rules(h: &Harness, rules: RuleSet) {
     h.settings.write().rules = Arc::new(rules);
+}
+
+/// A GET that ignores the operating system's proxy settings, so these tests do not depend on the machine they run on.
+async fn direct_get(url: String) -> reqwest::Result<reqwest::Response> {
+    reqwest::Client::builder().no_proxy().build()?.get(url).send().await
 }
 
 fn plain_client(h: &Harness) -> reqwest::Client {
@@ -843,7 +862,7 @@ async fn reverse_proxy_exposes_a_target_on_a_local_port() {
     assert!(h.handle.apply_rules(rules).await.is_empty());
 
     // A plain client with no proxy configured: it just talks to the local port.
-    let resp = reqwest::get(format!("http://127.0.0.1:{port}/headers?x=1")).await.unwrap();
+    let resp = direct_get(format!("http://127.0.0.1:{port}/headers?x=1")).await.unwrap();
     let body = resp.text().await.unwrap();
     assert!(body.contains(&format!("host: {up}")), "the server sees its own host name:\n{body}");
     assert!(body.contains("query: x=1"));
@@ -861,11 +880,11 @@ async fn listeners_follow_the_rules_and_report_bind_failures() {
     let mut rules = RuleSet::default();
     rules.reverse.push(ReverseRule { listen_port: port, target: format!("http://{up}"), ..Default::default() });
     assert!(h.handle.apply_rules(rules).await.is_empty());
-    assert!(reqwest::get(format!("http://127.0.0.1:{port}/hello")).await.is_ok());
+    assert!(direct_get(format!("http://127.0.0.1:{port}/hello")).await.is_ok());
 
     // Removing the rule closes the port.
     assert!(h.handle.apply_rules(RuleSet::default()).await.is_empty());
-    assert!(reqwest::get(format!("http://127.0.0.1:{port}/hello")).await.is_err());
+    assert!(direct_get(format!("http://127.0.0.1:{port}/hello")).await.is_err());
 
     // A port that is already taken is reported instead of silently ignored.
     let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -888,7 +907,7 @@ async fn listeners_follow_the_rules_and_report_bind_failures() {
 #[tokio::test]
 async fn serves_a_pac_file_pointing_back_at_the_proxy() {
     let h = start_proxy(None).await;
-    let direct = reqwest::get(format!("http://{}/proxy.pac", h.proxy)).await.unwrap();
+    let direct = direct_get(format!("http://{}/proxy.pac", h.proxy)).await.unwrap();
     assert_eq!(direct.headers()["content-type"], "application/x-ns-proxy-autoconfig");
     let script = direct.text().await.unwrap();
     assert!(script.contains("FindProxyForURL"));
