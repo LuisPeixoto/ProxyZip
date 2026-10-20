@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.proxyzip.app</id>
+  <name>ProxyZip</name>
+  <summary>Capture, inspect and debug HTTP(S) traffic</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="dev.proxyzip"><name>Luis Peixoto</name></developer>
+  <description>
+    <p>ProxyZip sits between your applications and the internet, decrypts HTTPS with a certificate authority that stays on your computer, and shows every request, response and WebSocket message in real time.</p>
+    <p>Pause and edit requests, mock responses, rewrite traffic, script it in JavaScript, decode Protobuf, gRPC and GraphQL, and let AI assistants inspect captures through MCP.</p>
+  </description>
+  <url type="homepage">https://github.com/LuisPeixoto/ProxyZip</url>
+  <url type="bugtracker">https://github.com/LuisPeixoto/ProxyZip/issues</url>
+  <launchable type="desktop-id">dev.proxyzip.app.desktop</launchable>
+  <categories><category>Development</category><category>Network</category></categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="{{version}}" date="2026-01-01"/>
+  </releases>
+</component>

@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.9.0.schema.json
+PackageIdentifier: ProxyZip.ProxyZip
+PackageVersion: {{version}}
+InstallerType: nullsoft
+Scope: user
+InstallModes:
+  - interactive
+  - silent
+InstallerSwitches:
+  Silent: /S
+  SilentWithProgress: /S
+UpgradeBehavior: install
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/LuisPeixoto/ProxyZip/releases/download/v{{version}}/ProxyZip_{{version}}_x64-setup.exe
+    InstallerSha256: {{sha256:ProxyZip_{{version}}_x64-setup.exe}}
+ManifestType: installer
+ManifestVersion: 1.9.0
