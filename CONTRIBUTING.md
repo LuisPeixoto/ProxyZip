@@ -53,9 +53,12 @@ Tips:
 | Breakpoints, throttling, SOCKS5 | `crates/proxyzip-proxy/src/{breakpoint,throttle,socks}.rs` |
 | Data model and events | `crates/proxyzip-core/src` |
 | Body decoding and viewers | `crates/proxyzip-codec/src` |
-| Scripting | `crates/proxyzip-script/src` |
+| Scripting and plugins | `crates/proxyzip-script/src` |
+| MCP server | `crates/proxyzip-mcp/src` |
+| HTTP/3, Alt-Svc | `crates/proxyzip-proxy/src/{h3,altsvc}.rs` |
+| Packaging templates | `packaging` |
 | HAR, sessions, CSV, Postman, code generation | `crates/proxyzip-export/src` |
-| OS integration | `crates/proxyzip-sysproxy`, `crates/proxyzip-certinstall` |
+| OS integration, devices, runtimes | `crates/proxyzip-sysproxy`, `crates/proxyzip-certinstall` |
 | Desktop commands | `apps/desktop/src-tauri/src/commands.rs` |
 | Interface | `apps/desktop/src/lib/components` |
 
