@@ -67,6 +67,9 @@
           <Icon name="chevronRight" size={14} class="text-faint" />
           <input bind:value={rule.target} spellcheck="false" placeholder="https://api.example.com/v1" aria-label="Target URL" class="{field} flex-1" />
         </div>
+        <label class="mt-2 flex items-center gap-2 text-[12px] text-muted" title="Also accept HTTP/3 (QUIC) on the same port number over UDP">
+          <input type="checkbox" bind:checked={rule.h3} class="accent-[var(--accent)]" /> Also accept HTTP/3 on UDP port {rule.listen_port}
+        </label>
       </RuleCard>
     {/each}
   </TabFrame>
