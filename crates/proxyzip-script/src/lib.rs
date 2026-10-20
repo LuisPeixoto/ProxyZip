@@ -8,7 +8,8 @@
 
 mod convert;
 mod engine;
+pub mod plugin;
 mod worker;
 
 pub use convert::{ScriptRequest, ScriptResponse};
-pub use engine::{Limits, RunOutput, ScriptEngine, Verdict};
+pub use engine::{Limits, PluginEntry, RunOutput, ScriptEngine, Verdict};
