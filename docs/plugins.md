@@ -36,7 +36,7 @@ my-plugin/
 ```
 
 `id` uses `a-z`, `0-9`, `.`, `_` and `-`. `api` is the plugin API version the plugin was written for (currently `1`);
-a plugin that needs a newer one is refused with a message. Everything under `contributes` is optional.
+a plugin that needs a newer one is refused with a message. Everything under `contributes` is optional. Plugin API 2 adds `settings` and `tabs` (below); API 1 plugins keep working.
 
 ## Hooks
 
@@ -80,10 +80,73 @@ function generate(request) {
 }
 ```
 
+## Settings
+
+A plugin can let the user choose values (API 2). Declare them in `plugin.json`:
+
+```json
+"settings": [
+  { "key": "name", "label": "Header name", "type": "string", "default": "x-debug" },
+  { "key": "retries", "label": "Retries", "type": "number", "default": 3 },
+  { "key": "mask", "label": "Mask values", "type": "boolean", "default": true },
+  { "key": "mode", "label": "Mode", "type": "select", "options": ["fast", "safe"] }
+]
+```
+
+**Settings → Plugins → Settings** shows a form, and `main.js` reads the values as `plugin.settings.name`. Hooks pick up
+changes immediately. The same `plugin` object has `id`, `name` and `version`.
+
+## Inspector tabs
+
+A plugin can add a tab next to the response's *Body* and *Timing* (API 2):
+
+```json
+"contributes": { "tabs": [{ "id": "timeline", "name": "Timeline" }] }
+```
+
+```js
+function render(flow, info) {
+  return { type: "table", content: { columns: ["Phase", "ms"], rows: [["Total", String(flow.timing.finished - flow.timing.started)]] } };
+}
+```
+
+`flow` has `id`, `request` and `response` (as in scripts, bodies decoded), `timing` (`started`, `request_sent`,
+`response_started`, `finished` in milliseconds), `tags`, `client`, `tls` and `error`. The result is one of:
+
+| `type` | `content` |
+|--------|-----------|
+| `text` | A string |
+| `markdown` | A string: headings, lists, code blocks, `**bold**` and `` `code` `` (no HTML) |
+| `json` | Any value, shown as a tree |
+| `table` | `{ columns: [...], rows: [[...], ...] }` |
+
+<p align="center">
+  <img src="images/plugin-tab.png" alt="The Timeline tab added by a plugin, showing the time spent in each phase" />
+</p>
+
+## Catalog
+
+**Settings → Plugins → Browse the catalog** lists the plugins published in the [`plugins`](../plugins) folder of the
+ProxyZip repository. Installing downloads the files and checks every one against its SHA-256 in
+[`catalog.json`](../plugins/catalog.json); a file that does not match is not installed. Updates are offered when the
+catalog has a newer version.
+
+To contribute a plugin, add a folder to `plugins/`, run `python3 plugins/build_catalog.py` to refresh the catalog, and
+open a pull request. CI checks that the catalog matches the files.
+
 ## Examples
 
-[`examples/plugins`](../examples/plugins) has two complete plugins: **JWT viewer** (a viewer and a Markdown “copy as”)
-and **Request ID** (a hook). They are covered by tests, so they keep working.
+[`plugins`](../plugins) holds the catalog:
+
+| Plugin | What it shows |
+|--------|---------------|
+| **JWT viewer** | A viewer and a Markdown “copy as” |
+| **Request ID** | A hook |
+| **Base64 viewer** | A viewer with a setting |
+| **Add header** | A hook driven by four settings |
+| **Request timeline** | An inspector tab |
+
+They are covered by tests, so they keep working.
 
 ## Helpers
 
