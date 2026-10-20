@@ -67,7 +67,7 @@ pub struct FlowDetail {
 }
 
 #[tauri::command]
-pub fn get_flow_detail(state: State<'_, AppState>, id: FlowId) -> CmdResult<FlowDetail> {
+pub async fn get_flow_detail(state: State<'_, AppState>, id: FlowId) -> CmdResult<FlowDetail> {
     let flow = state.store.get(id).ok_or("flow not found")?;
     let req = &flow.request;
     let query = req.query().map(proxyzip_codec::parse_query).unwrap_or_default();
@@ -88,7 +88,7 @@ pub fn get_flow_detail(state: State<'_, AppState>, id: FlowId) -> CmdResult<Flow
         path: &req.path,
     };
     let (request_type, response_type) = state.rules.read().proto_types(&info).unwrap_or((None, None));
-    let request = RequestView {
+    let mut request = RequestView {
         headers: req.headers.clone(),
         query,
         cookies,
@@ -102,7 +102,7 @@ pub fn get_flow_detail(state: State<'_, AppState>, id: FlowId) -> CmdResult<Flow
             message_type: request_type.as_deref(),
         }),
     };
-    let response = flow.response.as_ref().map(|r| ResponseView {
+    let mut response = flow.response.as_ref().map(|r| ResponseView {
         status: r.status,
         reason: r.reason.clone(),
         http_version: r.http_version.clone(),
@@ -118,6 +118,11 @@ pub fn get_flow_detail(state: State<'_, AppState>, id: FlowId) -> CmdResult<Flow
             message_type: response_type.as_deref(),
         }),
     });
+    let url = flow.request.url();
+    plugin_decode(&state, &mut request.body, &url).await;
+    if let Some(r) = response.as_mut() {
+        plugin_decode(&state, &mut r.body, &url).await;
+    }
     let ws_messages = flow
         .ws_messages
         .iter()
@@ -141,6 +146,43 @@ pub fn get_flow_detail(state: State<'_, AppState>, id: FlowId) -> CmdResult<Flow
         ws_messages,
         logs: flow.logs.clone(),
     })
+}
+
+/// Let plugin viewers decode a body that no built-in viewer recognised.
+async fn plugin_decode(state: &AppState, body: &mut proxyzip_codec::BodyView, url: &str) {
+    use proxyzip_script::{PluginEntry, Verdict};
+    if body.structured.is_some() || body.size == 0 {
+        return;
+    }
+    let content_type = body.mime.clone().unwrap_or_default();
+    let candidates: Vec<(String, String, String, String)> = state
+        .plugins
+        .read()
+        .viewers_for(&content_type)
+        .map(|(p, v)| (p.manifest.id.clone(), p.manifest.name.clone(), v.name.clone(), p.source.clone()))
+        .collect();
+    if candidates.is_empty() {
+        return;
+    }
+    let Some(engine) = state.proxy.lock().await.as_ref().map(|h| h.scripts.clone()) else { return };
+    for (_id, plugin_name, viewer_name, source) in candidates {
+        let first = serde_json::json!({ "text": body.text, "base64": body.base64 });
+        let second = serde_json::json!({ "contentType": content_type, "url": url });
+        match engine.call(&source, PluginEntry::Decode, first, second).await.verdict {
+            Ok(Verdict::Changed(v)) => {
+                let json = v.get("json").cloned().unwrap_or_else(|| v.clone());
+                let format = v.get("format").and_then(|f| f.as_str()).unwrap_or(&viewer_name).to_string();
+                body.structured = Some(proxyzip_codec::Structured {
+                    format,
+                    json,
+                    note: Some(format!("Decoded by the {plugin_name} plugin")),
+                });
+                return;
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!(plugin = %plugin_name, error = %e, "plugin viewer failed"),
+        }
+    }
 }
 
 #[tauri::command]
@@ -367,9 +409,189 @@ pub fn import_har(state: State<'_, AppState>, path: PathBuf) -> CmdResult<usize>
 }
 
 #[tauri::command]
-pub fn terminal_env(state: State<'_, AppState>) -> CmdResult<String> {
+pub fn terminal_env(state: State<'_, AppState>, shell: Option<String>) -> CmdResult<String> {
     let (h, p) = state.client_host_port().ok_or("proxy is not running")?;
-    Ok(proxyzip_certinstall::terminal_env(&h, p, &state.ca_path()))
+    let cert = state.ca_path();
+    Ok(match shell.as_deref().and_then(proxyzip_certinstall::runtime::Shell::from_name) {
+        Some(sh) => proxyzip_certinstall::terminal_env_for(sh, &h, p, &cert),
+        None => proxyzip_certinstall::terminal_env(&h, p, &cert),
+    })
+}
+
+#[derive(Serialize)]
+pub struct McpInfo {
+    pub enabled: bool,
+    pub port: u16,
+    pub running: bool,
+    pub url: String,
+    /// Shown so the user can copy it into an assistant's configuration. Anyone with it can read the captured traffic.
+    pub token: String,
+    pub allow_changes: bool,
+    pub error: Option<String>,
+}
+
+fn mcp_info(state: &AppState) -> CmdResult<McpInfo> {
+    let (enabled, port, allow) = {
+        let p = state.prefs.read();
+        (p.mcp_enabled, p.mcp_port, p.mcp_allow_changes)
+    };
+    Ok(McpInfo {
+        enabled,
+        port,
+        running: state.mcp_state.read().is_some(),
+        url: format!("http://127.0.0.1:{port}/mcp"),
+        token: proxyzip_mcp::discovery::load_or_create_token(&state.home).map_err(err)?,
+        allow_changes: allow,
+        error: state.mcp_error.read().clone(),
+    })
+}
+
+#[tauri::command]
+pub fn get_mcp_info(state: State<'_, AppState>) -> CmdResult<McpInfo> {
+    mcp_info(&state)
+}
+
+#[tauri::command]
+pub async fn set_mcp(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    enabled: bool,
+    port: u16,
+    allow_changes: bool,
+) -> CmdResult<McpInfo> {
+    let prefs = {
+        let mut p = state.prefs.write();
+        p.mcp_enabled = enabled;
+        p.mcp_port = port;
+        p.mcp_allow_changes = allow_changes;
+        p.clone()
+    };
+    prefs.save(&state.home).map_err(err)?;
+    crate::mcp::restart(&app).await;
+    mcp_info(&state)
+}
+
+#[tauri::command]
+pub async fn regenerate_mcp_token(app: tauri::AppHandle, state: State<'_, AppState>) -> CmdResult<McpInfo> {
+    proxyzip_mcp::discovery::regenerate_token(&state.home).map_err(err)?;
+    crate::mcp::restart(&app).await;
+    mcp_info(&state)
+}
+
+#[tauri::command]
+pub async fn open_terminal(state: State<'_, AppState>) -> CmdResult<()> {
+    let (h, p) = state.client_host_port().ok_or("proxy is not running")?;
+    let cert = state.ca_path();
+    tokio::task::spawn_blocking(move || {
+        proxyzip_certinstall::terminal::open(&h, p, &cert).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(err)?
+}
+
+#[derive(Serialize)]
+pub struct JavaInfo {
+    pub found: bool,
+    pub truststore: Option<String>,
+    pub store_type: Option<&'static str>,
+    pub password: &'static str,
+    pub options: Option<String>,
+}
+
+#[tauri::command]
+pub async fn java_setup(state: State<'_, AppState>) -> CmdResult<JavaInfo> {
+    let (h, p) = state.client_host_port().ok_or("proxy is not running")?;
+    let cert = state.ca_path();
+    tokio::task::spawn_blocking(move || {
+        let files = proxyzip_certinstall::runtime::prepare(&cert).map_err(|e| format!("{e:#}"))?;
+        let snippet =
+            proxyzip_certinstall::runtime::render(proxyzip_certinstall::runtime::Shell::Posix, &h, p, &cert, &files);
+        let options = snippet.lines().find(|l| l.starts_with("export JAVA_TOOL_OPTIONS=")).map(|l| {
+            l.trim_start_matches("export JAVA_TOOL_OPTIONS=\"${JAVA_TOOL_OPTIONS:+$JAVA_TOOL_OPTIONS }")
+                .trim_end_matches('"')
+                .to_string()
+        });
+        Ok(JavaInfo {
+            found: files.java_truststore.is_some(),
+            truststore: files.java_truststore.as_ref().map(|(p, _)| p.display().to_string()),
+            store_type: files.java_truststore.as_ref().map(|(_, t)| *t),
+            password: proxyzip_certinstall::runtime::JAVA_STORE_PASSWORD,
+            options,
+        })
+    })
+    .await
+    .map_err(err)?
+}
+
+#[tauri::command]
+pub async fn install_firefox(state: State<'_, AppState>) -> CmdResult<proxyzip_certinstall::firefox::FirefoxReport> {
+    let cert = state.ca_path();
+    tokio::task::spawn_blocking(move || proxyzip_certinstall::firefox::install(&cert).map_err(|e| format!("{e:#}")))
+        .await
+        .map_err(err)?
+}
+
+#[derive(Serialize)]
+pub struct IosInfo {
+    /// Address the phone should use as its Wi-Fi proxy, and the page to open on it.
+    pub proxy: Option<String>,
+    pub page: Option<String>,
+    pub qr_svg: Option<String>,
+}
+
+#[tauri::command]
+pub fn ios_setup(state: State<'_, AppState>) -> CmdResult<IosInfo> {
+    let port = state.client_host_port().map(|(_, p)| p).ok_or("proxy is not running")?;
+    let Some(ip) = lan_addresses().into_iter().next() else {
+        return Ok(IosInfo { proxy: None, page: None, qr_svg: None });
+    };
+    let page = format!("http://{ip}:{port}/");
+    let qr_svg = qrcode::QrCode::new(page.as_bytes())
+        .map(|c| c.render::<qrcode::render::svg::Color>().min_dimensions(180, 180).quiet_zone(true).build())
+        .ok();
+    Ok(IosInfo { proxy: Some(format!("{ip}:{port}")), page: Some(page), qr_svg })
+}
+
+#[tauri::command]
+pub async fn android_devices() -> CmdResult<Vec<proxyzip_certinstall::android::Device>> {
+    tokio::task::spawn_blocking(|| proxyzip_certinstall::android::list_devices().map_err(|e| format!("{e:#}")))
+        .await
+        .map_err(err)?
+}
+
+#[tauri::command]
+pub async fn android_set_proxy(state: State<'_, AppState>, serial: String, enable: bool) -> CmdResult<()> {
+    let port = state.client_host_port().map(|(_, p)| p).ok_or("proxy is not running")?;
+    tokio::task::spawn_blocking(move || {
+        if enable {
+            proxyzip_certinstall::android::set_proxy(&serial, port)
+        } else {
+            proxyzip_certinstall::android::clear_proxy(&serial)
+        }
+        .map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(err)?
+}
+
+/// Install the CA on an Android device, as a system certificate or through the user-certificate installer.
+#[tauri::command]
+pub async fn android_install_cert(state: State<'_, AppState>, serial: String, system: bool) -> CmdResult<String> {
+    let pem_path = state.ca_path();
+    let der = state.ca.read().cert_der().to_vec();
+    tokio::task::spawn_blocking(move || {
+        use proxyzip_certinstall::android;
+        if system {
+            android::install_system_cert(&serial, &pem_path, &der).map_err(|e| format!("{e:#}"))
+        } else {
+            let file = pem_path.with_file_name("proxyzip-ca.crt");
+            std::fs::write(&file, &der).map_err(|e| e.to_string())?;
+            android::install_user_cert(&serial, &file).map_err(|e| format!("{e:#}"))?;
+            Ok("Opened the certificate installer on the device. Confirm it there.".to_string())
+        }
+    })
+    .await
+    .map_err(err)?
 }
 
 /// Send a request through ProxyZip itself, so it shows up in the list like any other traffic.
@@ -473,6 +695,50 @@ pub async fn release_breakpoints(state: State<'_, AppState>) -> CmdResult<()> {
     Ok(())
 }
 
+// ---- Plugins ----------------------------------------------------------------------------------------------------------
+
+#[derive(Serialize)]
+pub struct PluginList {
+    plugins: Vec<proxyzip_script::plugin::Plugin>,
+    errors: Vec<proxyzip_script::plugin::LoadError>,
+    dir: String,
+}
+
+fn plugin_list(state: &AppState) -> PluginList {
+    let reg = state.plugins.read();
+    PluginList {
+        plugins: reg.plugins.clone(),
+        errors: reg.errors.clone(),
+        dir: crate::state::plugins_dir(&state.home).display().to_string(),
+    }
+}
+
+#[tauri::command]
+pub fn list_plugins(state: State<'_, AppState>) -> PluginList {
+    plugin_list(&state)
+}
+
+#[tauri::command]
+pub async fn install_plugin(state: State<'_, AppState>, path: String) -> CmdResult<PluginList> {
+    state.plugins.write().install(std::path::Path::new(&path)).map_err(|e| format!("{e:#}"))?;
+    state.refresh_plugin_hooks().await;
+    Ok(plugin_list(&state))
+}
+
+#[tauri::command]
+pub async fn set_plugin_enabled(state: State<'_, AppState>, id: String, enabled: bool) -> CmdResult<PluginList> {
+    state.plugins.write().set_enabled(&id, enabled).map_err(|e| format!("{e:#}"))?;
+    state.refresh_plugin_hooks().await;
+    Ok(plugin_list(&state))
+}
+
+#[tauri::command]
+pub async fn remove_plugin(state: State<'_, AppState>, id: String) -> CmdResult<PluginList> {
+    state.plugins.write().remove(&id).map_err(|e| format!("{e:#}"))?;
+    state.refresh_plugin_hooks().await;
+    Ok(plugin_list(&state))
+}
+
 // ---- Protobuf schemas -------------------------------------------------------------------------------------------------
 
 #[derive(Serialize)]
@@ -525,22 +791,60 @@ pub fn remove_proto(state: State<'_, AppState>, name: String) -> CmdResult<Proto
 
 #[derive(Serialize)]
 pub struct LanguageInfo {
-    id: &'static str,
-    label: &'static str,
-    syntax: &'static str,
+    id: String,
+    label: String,
+    syntax: String,
 }
 
 #[tauri::command]
-pub fn code_languages() -> Vec<LanguageInfo> {
-    proxyzip_export::codegen::Language::ALL
+pub fn code_languages(state: State<'_, AppState>) -> Vec<LanguageInfo> {
+    let mut out: Vec<LanguageInfo> = proxyzip_export::codegen::Language::ALL
         .iter()
-        .map(|l| LanguageInfo { id: l.id(), label: l.label(), syntax: l.syntax() })
-        .collect()
+        .map(|l| LanguageInfo { id: l.id().into(), label: l.label().into(), syntax: l.syntax().into() })
+        .collect();
+    for p in state.plugins.read().enabled() {
+        for c in &p.manifest.contributes.copy_as {
+            out.push(LanguageInfo {
+                id: format!("plugin:{}:{}", p.manifest.id, c.id),
+                label: format!("{} ({})", c.name, p.manifest.name),
+                syntax: c.syntax.clone(),
+            });
+        }
+    }
+    out
 }
 
 #[tauri::command]
-pub fn generate_code(state: State<'_, AppState>, id: FlowId, language: String) -> CmdResult<String> {
+pub async fn generate_code(state: State<'_, AppState>, id: FlowId, language: String) -> CmdResult<String> {
     let flow = state.store.get(id).ok_or("flow not found")?;
+    if let Some(rest) = language.strip_prefix("plugin:") {
+        let (plugin, entry) = rest.split_once(':').ok_or("unknown language")?;
+        let source = state
+            .plugins
+            .read()
+            .find_copy_as(plugin, entry)
+            .map(|(p, _)| p.source.clone())
+            .ok_or("that plugin is not available")?;
+        let engine = state.proxy.lock().await.as_ref().map(|h| h.scripts.clone()).ok_or("proxy is not running")?;
+        let (decoded, _, _) = proxyzip_codec::decode_content(&flow.request.headers, &flow.request.body);
+        let request = proxyzip_script::ScriptRequest {
+            method: flow.request.method.clone(),
+            url: flow.request.url(),
+            headers: flow.request.headers.0.clone(),
+            body: decoded.to_vec(),
+        };
+        let out = engine
+            .call(&source, proxyzip_script::PluginEntry::Generate, request.to_json(), serde_json::json!({}))
+            .await;
+        return match out.verdict {
+            Ok(proxyzip_script::Verdict::Changed(v)) => Ok(match v {
+                serde_json::Value::String(s) => s,
+                other => serde_json::to_string_pretty(&other).unwrap_or_default(),
+            }),
+            Ok(_) => Err("the plugin returned nothing for this request".into()),
+            Err(e) => Err(e),
+        };
+    }
     let language = proxyzip_export::codegen::Language::from_id(&language).ok_or("unknown language")?;
     Ok(proxyzip_export::codegen::generate(&flow, language))
 }
