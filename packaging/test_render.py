@@ -1,4 +1,4 @@
-"""Checks that the templates render into well-formed manifests. Run: python3 -m unittest packaging/test_render.py"""
+"""Checks that the templates render into well-formed manifests. Run: python3 packaging/test_render.py"""
 
 import hashlib
 import json

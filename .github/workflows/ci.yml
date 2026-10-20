@@ -77,4 +77,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Render and check the templates
-        run: python3 -m unittest packaging/test_render.py
+        run: python3 packaging/test_render.py
