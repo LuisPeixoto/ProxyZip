@@ -12,5 +12,6 @@ bytes = { workspace = true, features = ["serde"] }
 chrono.workspace = true
 dirs.workspace = true
 parking_lot.workspace = true
+regex = "1"
 serde.workspace = true
 tokio = { workspace = true, features = ["sync"] }
