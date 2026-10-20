@@ -322,7 +322,14 @@ async fn serve_connection(incoming: quinn::Incoming, ctx: Arc<Ctx>, target: Arc<
             let (mut parts, _) = request.into_parts();
             parts.version = http::Version::HTTP_3;
             let request = Request::from_parts(parts, Full::new(Bytes::from(body)));
-            let conn = Conn { peer, scheme: target.scheme, tunnel_target: None, tls: Some(tls), reverse: Some(target) };
+            let conn = Conn {
+                peer,
+                scheme: target.scheme,
+                tunnel_target: None,
+                tls: Some(tls),
+                reverse: Some(target),
+                mock: None,
+            };
             let Ok(response) = crate::forward::forward(request, ctx, conn).await else {
                 // The flow already says why; resetting the stream tells the client.
                 stream.stop_stream(h3::error::Code::H3_REQUEST_CANCELLED);
