@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.9.0.schema.json
+PackageIdentifier: ProxyZip.ProxyZip
+PackageVersion: {{version}}
+PackageLocale: en-US
+Publisher: Luis Peixoto
+PublisherUrl: https://github.com/LuisPeixoto
+PackageName: ProxyZip
+PackageUrl: https://github.com/LuisPeixoto/ProxyZip
+License: MIT
+LicenseUrl: https://github.com/LuisPeixoto/ProxyZip/blob/main/LICENSE
+ShortDescription: Capture, inspect and debug HTTP(S) traffic.
+Description: ProxyZip is an open-source debugging proxy for HTTP, HTTPS, HTTP/2, HTTP/3 and WebSocket with breakpoints, scripting, protocol viewers and an MCP server for AI assistants.
+Moniker: proxyzip
+Tags:
+  - debugging
+  - http
+  - https
+  - proxy
+  - developer-tools
+ReleaseNotesUrl: https://github.com/LuisPeixoto/ProxyZip/releases/tag/v{{version}}
+ManifestType: defaultLocale
+ManifestVersion: 1.9.0
