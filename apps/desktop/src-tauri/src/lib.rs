@@ -2,6 +2,7 @@
 //! exposes commands for inspection, export and system integration.
 
 mod commands;
+mod mcp;
 mod state;
 
 use std::time::Duration;
@@ -24,11 +25,17 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let state = tauri::async_runtime::block_on(AppState::init())?;
             let mut rx = state.store.subscribe();
             app.manage(state);
             let handle = app.handle().clone();
+            {
+                let app = handle.clone();
+                tauri::async_runtime::spawn(async move { mcp::restart(&app).await });
+            }
             // Batch events: emitting one IPC message per flow update would choke
             // the webview at a few thousand requests per second.
             tauri::async_runtime::spawn(async move {
@@ -62,6 +69,20 @@ pub fn run() {
             commands::set_pinned,
             commands::set_comment,
             commands::get_status,
+            commands::list_plugins,
+            commands::install_plugin,
+            commands::set_plugin_enabled,
+            commands::remove_plugin,
+            commands::get_mcp_info,
+            commands::set_mcp,
+            commands::regenerate_mcp_token,
+            commands::open_terminal,
+            commands::java_setup,
+            commands::install_firefox,
+            commands::ios_setup,
+            commands::android_devices,
+            commands::android_set_proxy,
+            commands::android_install_cert,
             commands::set_recording,
             commands::restart_proxy,
             commands::set_system_proxy,
@@ -107,6 +128,7 @@ pub fn run() {
             if let Some(state) = handle.try_state::<AppState>() {
                 state.restore_system_proxy();
                 state.save_last_session();
+                proxyzip_mcp::discovery::unpublish(&state.home);
             }
         }
     });
