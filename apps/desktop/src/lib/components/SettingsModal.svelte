@@ -120,6 +120,7 @@
         <section>
           {@render section("About & updates", "info")}
           <div class="rounded-xl border border-line bg-panel-2 p-4">
+            <label class="mb-3 flex items-center gap-2"><input type="checkbox" bind:checked={prefs.redact_exports} class="accent-[var(--accent)]" /> Remove secrets when exporting HAR, CSV and Postman <span class="text-faint">(tokens, cookies, passwords)</span></label>
             <div class="flex items-center gap-3">
               <span class="font-medium">ProxyZip {version}</span>
               <button onclick={checkNow} class="rounded-lg border border-line px-3 py-1.5 hover:bg-hover">Check for updates</button>
