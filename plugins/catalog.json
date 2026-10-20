@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "plugins": [
+    {
+      "id": "add-header",
+      "name": "Add header",
+      "version": "1.0.0",
+      "description": "Adds a header to the requests of a host, for example to switch a feature flag on.",
+      "author": "ProxyZip",
+      "provides": [
+        "hook"
+      ],
+      "settings": true,
+      "base_url": "https://raw.githubusercontent.com/LuisPeixoto/ProxyZip/main/plugins/add-header",
+      "files": [
+        {
+          "path": "main.js",
+          "sha256": "25ffe4ec1c49e63ace3cd8740dd6493043c3c2df13242ee4aaab0a77477b3681"
+        },
+        {
+          "path": "plugin.json",
+          "sha256": "9292809fb7658f021d48b7f17f6d68245b52d4ff68e188da2e377ed2c4927905"
+        }
+      ]
+    },
+    {
+      "id": "base64-viewer",
+      "name": "Base64 viewer",
+      "version": "1.0.0",
+      "description": "Decodes bodies that are Base64 text, and shows JSON inside them as a tree.",
+      "author": "ProxyZip",
+      "provides": [
+        "viewer"
+      ],
+      "settings": true,
+      "base_url": "https://raw.githubusercontent.com/LuisPeixoto/ProxyZip/main/plugins/base64-viewer",
+      "files": [
+        {
+          "path": "main.js",
+          "sha256": "94e12dbc7131294df230d3d75f13ceef3e5fff8f6db3721e9afbc2faa999e1d2"
+        },
+        {
+          "path": "plugin.json",
+          "sha256": "efbbd3ee21dc105ba44c6f44fd0299b62f9be622b6e7cdde32ab0df509cc61ef"
+        }
+      ]
+    },
+    {
+      "id": "jwt-viewer",
+      "name": "JWT viewer",
+      "version": "1.0.0",
+      "description": "Decodes JSON Web Tokens in bodies, and adds a Markdown bug-report format to Code.",
+      "author": "ProxyZip",
+      "provides": [
+        "viewer",
+        "copy as"
+      ],
+      "settings": false,
+      "base_url": "https://raw.githubusercontent.com/LuisPeixoto/ProxyZip/main/plugins/jwt-viewer",
+      "files": [
+        {
+          "path": "main.js",
+          "sha256": "484ede1ebb291cc8e64ed46c3721701b225c24e3f063a1646dcaa75455e3d5d2"
+        },
+        {
+          "path": "plugin.json",
+          "sha256": "70677357855535bc11c4b1277527aa2b3d75abc2bcc67cb6c8ccfd156479d443"
+        }
+      ]
+    },
+    {
+      "id": "request-id",
+      "name": "Request ID",
+      "version": "1.0.0",
+      "description": "Adds an X-Request-Id header to every request that does not have one.",
+      "author": "ProxyZip",
+      "provides": [
+        "hook"
+      ],
+      "settings": false,
+      "base_url": "https://raw.githubusercontent.com/LuisPeixoto/ProxyZip/main/plugins/request-id",
+      "files": [
+        {
+          "path": "main.js",
+          "sha256": "755f0b6d334944121bf10246d0093c96860433af8b07a54d0af90e06677a3e83"
+        },
+        {
+          "path": "plugin.json",
+          "sha256": "97ed0508f5a008cdbf703143d08bb78d3d9e4f30452f1f6373a8c64a851aac38"
+        }
+      ]
+    },
+    {
+      "id": "request-timeline",
+      "name": "Request timeline",
+      "version": "1.0.0",
+      "description": "Adds a Timeline tab to the inspector with the time spent in each phase.",
+      "author": "ProxyZip",
+      "provides": [
+        "tab"
+      ],
+      "settings": false,
+      "base_url": "https://raw.githubusercontent.com/LuisPeixoto/ProxyZip/main/plugins/request-timeline",
+      "files": [
+        {
+          "path": "main.js",
+          "sha256": "95f0085c1e857c5a54c0d196d7dea04a3fc955d28d68c2fb93368486c35bd614"
+        },
+        {
+          "path": "plugin.json",
+          "sha256": "8e08ded689d63e67e51ca1bcc15f41b09a8e7f73a7823f78f824cfcda928103a"
+        }
+      ]
+    }
+  ]
+}
