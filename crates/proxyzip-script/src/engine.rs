@@ -38,6 +38,15 @@ pub enum Verdict<T> {
     Block,
 }
 
+/// Functions a plugin can export besides the traffic hooks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginEntry {
+    /// `decode(body, info)`: turn a body into `{ format, json }`.
+    Decode,
+    /// `generate(request)`: turn a request into code.
+    Generate,
+}
+
 /// The outcome of running a script, plus whatever it printed.
 #[derive(Debug)]
 pub struct RunOutput<T> {
@@ -147,6 +156,27 @@ impl ScriptEngine {
             map.insert(id, shared.to_string());
         }
         (value, report.logs)
+    }
+
+    /// Call a plugin entry point: `decode(body, info)` or `generate(request)`.
+    ///
+    /// The result is `None` when the script has no such function or returned `null`.
+    pub async fn call(&self, source: &str, entry: PluginEntry, first: Value, second: Value) -> RunOutput<Value> {
+        let phase = match entry {
+            PluginEntry::Decode => "decode",
+            PluginEntry::Generate => "generate",
+        };
+        let (value, logs) = self.run(source, phase, first, Some(second)).await;
+        let verdict = value.map(|v| {
+            if v.get("skipped").and_then(Value::as_bool) == Some(true) {
+                return Verdict::Unchanged;
+            }
+            match v.get("result") {
+                Some(r) if !r.is_null() => Verdict::Changed(r.clone()),
+                _ => Verdict::Unchanged,
+            }
+        });
+        RunOutput { verdict, logs }
     }
 
     /// Run the script's `onRequest(ctx, request)`.
@@ -422,5 +452,41 @@ mod tests {
         for t in tasks {
             t.await.unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn plugin_entry_points_decode_and_generate() {
+        use serde_json::json;
+        let engine = fast();
+        let src = "function decode(body, info) { return { format: 'demo', json: { len: body.text.length, type: info.contentType } }; }\n\
+                   function generate(request) { return 'GET ' + request.url; }";
+        let out = engine
+            .call(
+                src,
+                PluginEntry::Decode,
+                json!({ "text": "hello", "base64": "aGVsbG8=" }),
+                json!({ "contentType": "x/y" }),
+            )
+            .await;
+        let Ok(Verdict::Changed(v)) = out.verdict else { panic!("{:?}", out.verdict) };
+        assert_eq!(v["json"]["len"], 5);
+        assert_eq!(v["json"]["type"], "x/y");
+
+        let out = engine.call(src, PluginEntry::Generate, json!({ "url": "http://a/b" }), json!({})).await;
+        assert!(matches!(out.verdict, Ok(Verdict::Changed(v)) if v == json!("GET http://a/b")));
+    }
+
+    #[tokio::test]
+    async fn plugin_entry_points_that_are_missing_or_null_change_nothing() {
+        use serde_json::json;
+        let engine = fast();
+        let none = engine.call("function onRequest() {}", PluginEntry::Decode, json!({}), json!({})).await;
+        assert!(matches!(none.verdict, Ok(Verdict::Unchanged)));
+        let null = engine.call("function decode() { return null; }", PluginEntry::Decode, json!({}), json!({})).await;
+        assert!(matches!(null.verdict, Ok(Verdict::Unchanged)));
+        let boom = engine
+            .call("function generate() { throw new Error('nope'); }", PluginEntry::Generate, json!({}), json!({}))
+            .await;
+        assert!(boom.verdict.unwrap_err().contains("nope"));
     }
 }
