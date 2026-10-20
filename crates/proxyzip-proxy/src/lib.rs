@@ -8,9 +8,11 @@
 //!                                              upstream (hyper + rustls)
 //! ```
 
+mod altsvc;
 mod breakpoint;
 mod config;
 mod forward;
+mod h3;
 mod local;
 mod rewind;
 mod server;
