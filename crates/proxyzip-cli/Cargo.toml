@@ -18,6 +18,7 @@ clap.workspace = true
 proxyzip-certinstall.workspace = true
 proxyzip-core.workspace = true
 proxyzip-export.workspace = true
+proxyzip-mcp.workspace = true
 proxyzip-proxy.workspace = true
 proxyzip-rules.workspace = true
 proxyzip-sysproxy.workspace = true
