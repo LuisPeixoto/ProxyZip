@@ -1,0 +1,17 @@
+{
+  "id": "add-header",
+  "name": "Add header",
+  "version": "1.0.0",
+  "description": "Adds a header to the requests of a host, for example to switch a feature flag on.",
+  "author": "ProxyZip",
+  "api": 2,
+  "contributes": {
+    "hooks": { "pattern": "", "request": true }
+  },
+  "settings": [
+    { "key": "host", "label": "Only for hosts containing", "type": "string", "default": "", "description": "Leave empty for every request." },
+    { "key": "name", "label": "Header name", "type": "string", "default": "x-debug" },
+    { "key": "value", "label": "Header value", "type": "string", "default": "proxyzip" },
+    { "key": "only_when_missing", "label": "Keep the header if the request already has it", "type": "boolean", "default": true }
+  ]
+}
