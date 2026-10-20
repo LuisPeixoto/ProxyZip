@@ -64,6 +64,16 @@ pub struct FlowDetail {
     comment: Option<String>,
     ws_messages: Vec<WsView>,
     logs: Vec<LogLine>,
+    /// Tabs that enabled plugins add to the inspector.
+    plugin_tabs: Vec<PluginTab>,
+}
+
+#[derive(Serialize)]
+pub struct PluginTab {
+    plugin: String,
+    plugin_name: String,
+    id: String,
+    name: String,
 }
 
 #[tauri::command]
@@ -145,6 +155,18 @@ pub async fn get_flow_detail(state: State<'_, AppState>, id: FlowId) -> CmdResul
         comment: flow.comment.clone(),
         ws_messages,
         logs: flow.logs.clone(),
+        plugin_tabs: state
+            .plugins
+            .read()
+            .tabs()
+            .into_iter()
+            .map(|(p, t)| PluginTab {
+                plugin: p.manifest.id.clone(),
+                plugin_name: p.manifest.name.clone(),
+                id: t.id.clone(),
+                name: t.name.clone(),
+            })
+            .collect(),
     })
 }
 
@@ -159,7 +181,7 @@ async fn plugin_decode(state: &AppState, body: &mut proxyzip_codec::BodyView, ur
         .plugins
         .read()
         .viewers_for(&content_type)
-        .map(|(p, v)| (p.manifest.id.clone(), p.manifest.name.clone(), v.name.clone(), p.source.clone()))
+        .map(|(p, v)| (p.manifest.id.clone(), p.manifest.name.clone(), v.name.clone(), p.runtime_source()))
         .collect();
     if candidates.is_empty() {
         return;
@@ -388,10 +410,7 @@ pub fn copy_as_curl(state: State<'_, AppState>, id: FlowId) -> CmdResult<String>
 
 #[tauri::command]
 pub fn export_har(state: State<'_, AppState>, path: PathBuf, ids: Option<Vec<FlowId>>) -> CmdResult<usize> {
-    let flows = match ids {
-        Some(ids) => state.store.get_many(&ids),
-        None => state.store.all(),
-    };
+    let flows = export_flows(&state, ids);
     let json = proxyzip_export::har::export_json(&flows).map_err(err)?;
     std::fs::write(&path, json).map_err(err)?;
     Ok(flows.len())
@@ -823,7 +842,7 @@ pub async fn generate_code(state: State<'_, AppState>, id: FlowId, language: Str
             .plugins
             .read()
             .find_copy_as(plugin, entry)
-            .map(|(p, _)| p.source.clone())
+            .map(|(p, _)| p.runtime_source())
             .ok_or("that plugin is not available")?;
         let engine = state.proxy.lock().await.as_ref().map(|h| h.scripts.clone()).ok_or("proxy is not running")?;
         let (decoded, _, _) = proxyzip_codec::decode_content(&flow.request.headers, &flow.request.body);
@@ -882,10 +901,28 @@ fn select_flows(state: &AppState, ids: Option<Vec<FlowId>>) -> Vec<proxyzip_core
     }
 }
 
-/// Save flows (all of them, or the selected ones) to a `.pzsession` file.
+/// Flows for an export: redacted when the preference says so.
+fn export_flows(state: &AppState, ids: Option<Vec<FlowId>>) -> Vec<proxyzip_core::Flow> {
+    let flows = select_flows(state, ids);
+    if state.prefs.read().redact_exports {
+        proxyzip_export::redact::redacted(&flows, &Default::default())
+    } else {
+        flows
+    }
+}
+
+/// Save flows (all of them, or the selected ones) to a `.pzsession` file. `redacted` removes secrets first.
 #[tauri::command]
-pub fn save_session(state: State<'_, AppState>, path: PathBuf, ids: Option<Vec<FlowId>>) -> CmdResult<usize> {
-    let flows = select_flows(&state, ids);
+pub fn save_session(
+    state: State<'_, AppState>,
+    path: PathBuf,
+    ids: Option<Vec<FlowId>>,
+    redacted: Option<bool>,
+) -> CmdResult<usize> {
+    let mut flows = select_flows(&state, ids);
+    if redacted == Some(true) {
+        flows = proxyzip_export::redact::redacted(&flows, &Default::default());
+    }
     let bytes = proxyzip_export::session::write(&flows).map_err(|e| format!("{e:#}"))?;
     std::fs::write(&path, bytes).map_err(err)?;
     state.remember_session(&path, flows.len());
@@ -920,18 +957,122 @@ pub fn forget_recent_session(state: State<'_, AppState>, path: String) {
 
 #[tauri::command]
 pub fn export_csv(state: State<'_, AppState>, path: PathBuf, ids: Option<Vec<FlowId>>) -> CmdResult<usize> {
-    let flows = select_flows(&state, ids);
+    let flows = export_flows(&state, ids);
     std::fs::write(&path, proxyzip_export::csv::export(&flows)).map_err(err)?;
     Ok(flows.len())
 }
 
 #[tauri::command]
 pub fn export_postman(state: State<'_, AppState>, path: PathBuf, ids: Option<Vec<FlowId>>) -> CmdResult<usize> {
-    let flows = select_flows(&state, ids);
+    let flows = export_flows(&state, ids);
     let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("ProxyZip").to_string();
     let json = proxyzip_export::postman::export_json(&name, &flows).map_err(err)?;
     std::fs::write(&path, json).map_err(err)?;
     Ok(flows.len())
+}
+
+// ---- Workspaces -------------------------------------------------------------------------------------------------------
+
+#[derive(Serialize)]
+pub struct WorkspaceSummary {
+    rules: usize,
+    protos: usize,
+    plugins: usize,
+}
+
+/// Save the rules, imported descriptors, SSL lists and enabled plugins to a `.pzworkspace` file.
+#[tauri::command]
+pub fn export_workspace(state: State<'_, AppState>, path: PathBuf, redact: bool) -> CmdResult<WorkspaceSummary> {
+    use proxyzip_export::workspace::{SslSettings, Workspace};
+    let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("ProxyZip").to_string();
+    let mut workspace = Workspace::new(name, state.rules.read().clone());
+    if let Ok(entries) = std::fs::read_dir(crate::state::protos_dir(&state.home)) {
+        let mut files: Vec<_> = entries.flatten().map(|e| e.path()).filter(|p| p.is_file()).collect();
+        files.sort();
+        for file in files {
+            if let (Some(n), Ok(bytes)) = (file.file_name().and_then(|n| n.to_str()), std::fs::read(&file)) {
+                workspace.add_proto(n, &bytes);
+            }
+        }
+    }
+    workspace.plugins = state.plugins.read().enabled().map(|p| p.manifest.id.clone()).collect();
+    let ssl = state.prefs.read().ssl.clone();
+    workspace.ssl = Some(SslSettings { intercept_all: ssl.intercept_all, include: ssl.include, exclude: ssl.exclude });
+    let text = proxyzip_export::workspace::write(&workspace, redact).map_err(|e| format!("{e:#}"))?;
+    std::fs::write(&path, text).map_err(err)?;
+    let r = &workspace.rules;
+    Ok(WorkspaceSummary {
+        rules: r.block.len()
+            + r.map_local.len()
+            + r.map_remote.len()
+            + r.rewrite.len()
+            + r.breakpoints.len()
+            + r.scripts.len()
+            + r.dns.len()
+            + r.reverse.len(),
+        protos: workspace.protos.len(),
+        plugins: workspace.plugins.len(),
+    })
+}
+
+/// Load a `.pzworkspace` file, replacing the current setup or adding to it.
+#[tauri::command]
+pub async fn import_workspace(state: State<'_, AppState>, path: PathBuf, merge: bool) -> CmdResult<WorkspaceSummary> {
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
+    let workspace = proxyzip_export::workspace::read(&text).map_err(|e| format!("{e:#}"))?;
+    let protos = workspace.proto_bytes().map_err(|e| format!("{e:#}"))?;
+    let dir = crate::state::protos_dir(&state.home);
+    std::fs::create_dir_all(&dir).map_err(err)?;
+    for (name, bytes) in &protos {
+        // Only the file name is used, so a crafted workspace cannot write outside the folder.
+        let Some(safe) = std::path::Path::new(name).file_name() else { continue };
+        std::fs::write(dir.join(safe), bytes).map_err(err)?;
+    }
+    state.reload_protos();
+    if let Some(ssl) = workspace.ssl.clone() {
+        let prefs = {
+            let mut p = state.prefs.write();
+            if merge {
+                for h in ssl.include {
+                    if !p.ssl.include.contains(&h) {
+                        p.ssl.include.push(h);
+                    }
+                }
+                for h in ssl.exclude {
+                    if !p.ssl.exclude.contains(&h) {
+                        p.ssl.exclude.push(h);
+                    }
+                }
+            } else {
+                p.ssl.intercept_all = ssl.intercept_all;
+                p.ssl.include = ssl.include;
+                p.ssl.exclude = ssl.exclude;
+            }
+            p.clone()
+        };
+        prefs.save(&state.home).map_err(err)?;
+    }
+    for id in &workspace.plugins {
+        let _ = state.plugins.write().set_enabled(id, true);
+    }
+    let summary = WorkspaceSummary { rules: 0, protos: protos.len(), plugins: workspace.plugins.len() };
+    let mut rules = workspace.rules;
+    let count = rules.block.len()
+        + rules.map_local.len()
+        + rules.map_remote.len()
+        + rules.rewrite.len()
+        + rules.breakpoints.len()
+        + rules.scripts.len()
+        + rules.dns.len()
+        + rules.reverse.len();
+    if merge {
+        let mut base = state.rules.read().clone();
+        proxyzip_export::workspace::merge_rules(&mut base, rules);
+        rules = base;
+    }
+    state.apply_rules(rules).await.map_err(|e| format!("{e:#}"))?;
+    state.apply_live_settings().await;
+    Ok(WorkspaceSummary { rules: count, ..summary })
 }
 
 // ---- Script testing ---------------------------------------------------------------------------------------------------
