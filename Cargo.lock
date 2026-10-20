@@ -3812,7 +3812,7 @@ name = "proxyzip-certinstall"
 version = "0.5.0"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
+ "base64 0.23.1",
  "dirs 6.0.0",
  "md-5",
  "rcgen",
@@ -3851,7 +3851,7 @@ dependencies = [
 name = "proxyzip-codec"
 version = "0.5.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "brotli 8.0.4",
  "bytes",
  "flate2",
@@ -3891,7 +3891,7 @@ name = "proxyzip-desktop"
 version = "0.5.0"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "parking_lot",
  "proxyzip-certinstall",
@@ -3927,7 +3927,7 @@ name = "proxyzip-export"
 version = "0.5.0"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "chrono",
  "flate2",
@@ -3983,7 +3983,7 @@ name = "proxyzip-proxy"
 version = "0.5.0"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "flate2",
  "futures-util",
@@ -4038,7 +4038,7 @@ name = "proxyzip-script"
 version = "0.5.0"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
+ "base64 0.23.1",
  "hmac",
  "md-5",
  "proxyzip-core",

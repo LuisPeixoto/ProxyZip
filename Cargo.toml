@@ -30,7 +30,7 @@ proxyzip-certinstall = { path = "crates/proxyzip-certinstall" }
 anyhow = "1"
 thiserror = "2"
 bytes = "1"
-base64 = "0.22"
+base64 = "0.23"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 futures-util = "0.3"
