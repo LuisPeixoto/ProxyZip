@@ -11,6 +11,8 @@
   import ProtobufTab from "./tools/ProtobufTab.svelte";
   import RecordingTab from "./tools/RecordingTab.svelte";
   import ScriptsTab from "./tools/ScriptsTab.svelte";
+  import MocksTab from "./tools/MocksTab.svelte";
+  import SuitesTab from "./tools/SuitesTab.svelte";
   import RewriteTab from "./tools/RewriteTab.svelte";
   import ThrottleTab from "./tools/ThrottleTab.svelte";
 
@@ -25,6 +27,8 @@
     { id: "rewrite", label: "Rewrite", icon: "edit", count: (r) => r.rewrite.length },
     { id: "breakpoints", label: "Breakpoints", icon: "pause", count: (r) => r.breakpoints.length },
     { id: "scripts", label: "Scripts", icon: "code", count: (r) => r.scripts.length },
+    { id: "mocks", label: "Mocks", icon: "server", count: (r) => r.mocks.length },
+    { id: "suites", label: "Suites", icon: "play", count: () => 0 },
     { id: "protobuf", label: "Protobuf", icon: "layers", count: (r) => r.proto_mappings.length },
     { id: "throttle", label: "Throttling", icon: "gauge", count: (r) => (r.throttle.enabled ? 1 : 0) },
     { id: "dns", label: "DNS", icon: "globe", count: (r) => r.dns.length },
@@ -85,6 +89,8 @@
         {:else if app.toolsTab === "rewrite"}<RewriteTab bind:rules={draft} />
         {:else if app.toolsTab === "breakpoints"}<BreakpointsTab bind:rules={draft} />
         {:else if app.toolsTab === "scripts"}<ScriptsTab bind:rules={draft} />
+        {:else if app.toolsTab === "mocks"}<MocksTab bind:rules={draft} />
+        {:else if app.toolsTab === "suites"}<SuitesTab />
         {:else if app.toolsTab === "protobuf"}<ProtobufTab bind:rules={draft} />
         {:else if app.toolsTab === "throttle"}<ThrottleTab bind:rules={draft} />
         {:else if app.toolsTab === "dns"}<DnsTab bind:rules={draft} />

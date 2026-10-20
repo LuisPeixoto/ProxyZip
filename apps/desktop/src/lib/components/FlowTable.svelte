@@ -1,6 +1,6 @@
 <script lang="ts">
   import { app, type SortKey } from "../stores/app.svelte";
-  import { formatBytes, formatDuration, formatTime, type FlowSummary } from "../api";
+  import { api, formatBytes, formatDuration, formatTime, type FlowSummary } from "../api";
   import { methodClass, statusClass, tagClass, typeLabel } from "./Badges";
   import {
     addBreakpointFor,
@@ -91,6 +91,20 @@
     ensureVisible(next);
   }
 
+  async function makeMock(id: number) {
+    const count = await app.attempt(() => api.addMockFromFlow(id));
+    if (count == null) return;
+    app.rules = await api.getRules();
+    app.toast(`Mocked. The “Captured” server now answers ${count} route${count === 1 ? "" : "s"}.`, "ok");
+  }
+
+  async function addToSuite(ids: number[]) {
+    const suite = await app.attempt(() => api.suiteFromFlows(ids));
+    if (!suite) return;
+    app.suiteDraft = suite;
+    app.openTools("suites");
+  }
+
   function contextmenu(e: MouseEvent, f: FlowSummary) {
     e.preventDefault();
     if (!app.selected.has(f.id)) app.select(f.id);
@@ -103,6 +117,8 @@
         { label: "Copy URL", icon: "copy", action: () => copy(f.url, "URL copied") },
         { label: "Copy as cURL", icon: "terminal", disabled: many, action: () => copyCurl(f.id) },
         { label: "Generate code…", icon: "code", disabled: many || f.method === "CONNECT", action: () => (app.codeFor = f.id) },
+        { label: "Create a mock from this response", icon: "server", disabled: many || f.method === "CONNECT" || f.status == null, action: () => makeMock(f.id) },
+        { label: many ? `Add ${ids.length} requests to a suite…` : "Add to a suite…", icon: "play", disabled: ids.every((id) => app.get(id)?.method === "CONNECT"), action: () => addToSuite(ids) },
         { label: "Compare the two selected", icon: "columns", disabled: ids.length !== 2, shortcut: "⌘D", action: () => compare(ids) },
         { label: "Copy response body", icon: "code", disabled: many || f.response_size == null, action: () => copyResponseBody(f.id) },
         { separator: true },

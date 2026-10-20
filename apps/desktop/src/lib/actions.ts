@@ -141,17 +141,37 @@ export async function editAndRepeat(f: FlowSummary) {
 
 const stamp = () => new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
 
-export async function saveSession(ids: FlowId[] | null = null) {
+export async function saveSession(ids: FlowId[] | null = null, redacted = false) {
   const path = await save({
-    defaultPath: `proxyzip-${stamp()}.pzsession`,
+    defaultPath: `proxyzip-${stamp()}${redacted ? "-redacted" : ""}.pzsession`,
     filters: [{ name: "ProxyZip session", extensions: ["pzsession"] }],
   });
   if (!path) return;
-  const n = await app.attempt(() => api.saveSession(path, ids));
+  const n = await app.attempt(() => api.saveSession(path, ids, redacted));
   if (n == null) return;
-  app.markSaved();
-  app.toast(`Saved ${n} request${n === 1 ? "" : "s"}`, "ok");
+  // A redacted copy is for sharing, so it does not count as saving your work.
+  if (!redacted) app.markSaved();
+  app.toast(`Saved ${n} request${n === 1 ? "" : "s"}${redacted ? " with secrets removed" : ""}`, "ok");
   await app.refreshRecent();
+}
+
+export async function exportWorkspace() {
+  const path = await save({
+    defaultPath: `proxyzip-${stamp()}.pzworkspace`,
+    filters: [{ name: "ProxyZip workspace", extensions: ["pzworkspace"] }],
+  });
+  if (!path) return;
+  const s = await app.attempt(() => api.exportWorkspace(path, true));
+  if (s) app.toast(`Saved ${s.rules} rule${s.rules === 1 ? "" : "s"}, ${s.protos} descriptor${s.protos === 1 ? "" : "s"} (credentials hidden)`, "ok");
+}
+
+export async function importWorkspace(merge: boolean) {
+  const path = await open({ multiple: false, filters: [{ name: "ProxyZip workspace", extensions: ["pzworkspace"] }] });
+  if (typeof path !== "string") return;
+  const s = await app.attempt(() => api.importWorkspace(path, merge));
+  if (!s) return;
+  app.rules = await api.getRules();
+  app.toast(`${merge ? "Added" : "Loaded"} ${s.rules} rule${s.rules === 1 ? "" : "s"}`, "ok");
 }
 
 /** Choose a session file. With traffic already on screen the user is asked whether to replace it or add to it. */

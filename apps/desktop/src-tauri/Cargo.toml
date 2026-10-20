@@ -29,12 +29,14 @@ proxyzip-codec.workspace = true
 proxyzip-core.workspace = true
 proxyzip-export.workspace = true
 proxyzip-mcp.workspace = true
+proxyzip-openapi.workspace = true
+proxyzip-suite.workspace = true
 proxyzip-proxy.workspace = true
 proxyzip-rules.workspace = true
 proxyzip-script.workspace = true
 proxyzip-sysproxy.workspace = true
 proxyzip-tls.workspace = true
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-manual-roots"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "2", features = [] }

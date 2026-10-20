@@ -36,6 +36,8 @@ pub struct Preferences {
     pub strip_alt_svc: bool,
     /// Use HTTP/3 towards servers that advertise it (experimental).
     pub http3_upstream: bool,
+    /// Replace secrets (tokens, cookies, passwords) when exporting HAR, CSV or Postman.
+    pub redact_exports: bool,
 }
 
 /// A session file the user saved or opened recently.
@@ -64,6 +66,7 @@ impl Default for Preferences {
             check_updates: true,
             strip_alt_svc: true,
             http3_upstream: false,
+            redact_exports: true,
         }
     }
 }

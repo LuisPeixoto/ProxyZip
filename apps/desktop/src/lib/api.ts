@@ -95,6 +95,7 @@ export interface FlowDetail {
   comment: string | null;
   ws_messages: WsView[];
   logs: LogLine[];
+  plugin_tabs: PluginTabInfo[];
 }
 
 export interface LogLine {
@@ -141,6 +142,7 @@ export interface Preferences {
   check_updates: boolean;
   strip_alt_svc: boolean;
   http3_upstream: boolean;
+  redact_exports: boolean;
 }
 
 export interface PluginInfo {
@@ -150,16 +152,25 @@ export interface PluginInfo {
   description: string;
   author: string;
   enabled: boolean;
+  api: number;
+  values: Record<string, unknown>;
+  settings: PluginSetting[];
   contributes: {
     hooks: { pattern: string; request: boolean; response: boolean } | null;
     viewers: { id: string; name: string }[];
     copy_as: { id: string; name: string }[];
+    tabs: { id: string; name: string }[];
   };
 }
 export interface PluginList {
   plugins: PluginInfo[];
   errors: { folder: string; message: string }[];
   dir: string;
+}
+export interface WorkspaceSummary {
+  rules: number;
+  protos: number;
+  plugins: number;
 }
 export interface McpInfo {
   enabled: boolean;
@@ -265,6 +276,7 @@ export interface RuleSet {
     scripts: boolean;
     dns: boolean;
     reverse: boolean;
+    mocks: boolean;
   };
   block: BlockRule[];
   record_only: { enabled: boolean; matchers: Matcher[] };
@@ -273,12 +285,150 @@ export interface RuleSet {
   rewrite: RewriteRule[];
   breakpoints: BreakpointRule[];
   scripts: ScriptRule[];
+  mocks: MockServer[];
   proto_mappings: ProtoMapping[];
   throttle: { enabled: boolean; profile: ThrottleProfile; matchers: Matcher[] };
   dns: DnsRule[];
   upstream: UpstreamProxy;
   reverse: ReverseRule[];
   socks: { enabled: boolean; port: number };
+}
+
+export type MockBody = { type: "inline"; text: string } | { type: "file"; path: string };
+export interface MockRoute {
+  name: string;
+  enabled: boolean;
+  method: string;
+  path: string;
+  status: number;
+  headers: [string, string][];
+  body: MockBody;
+  template: boolean;
+  delay_ms: number;
+}
+export interface MockServer {
+  name: string;
+  enabled: boolean;
+  host: string;
+  listen_port: number | null;
+  passthrough: boolean;
+  routes: MockRoute[];
+}
+export interface ImportedSpec {
+  title: string;
+  routes: number;
+}
+export type ViolationKind =
+  | "undocumented_path"
+  | "undocumented_method"
+  | "missing_parameter"
+  | "invalid_parameter"
+  | "missing_request_body"
+  | "invalid_request_body"
+  | "undocumented_status"
+  | "invalid_response_body";
+export interface Violation {
+  flow_id: number;
+  method: string;
+  url: string;
+  operation: string | null;
+  kind: ViolationKind;
+  message: string;
+  pointer: string | null;
+}
+export interface ContractReport {
+  title: string;
+  checked: number;
+  skipped: number;
+  violations: Violation[];
+}
+
+export type SuiteAssertion =
+  | { type: "status"; equals?: number | null; class?: string | null }
+  | { type: "header"; name: string; equals?: string | null; contains?: string | null }
+  | { type: "jq"; expr: string; equals?: unknown }
+  | { type: "body_contains"; text: string }
+  | { type: "duration_below"; ms: number }
+  | { type: "open_api"; spec: string };
+export interface SuiteExtract {
+  var: string;
+  jq?: string | null;
+  header?: string | null;
+}
+export interface SuiteRequest {
+  name: string;
+  enabled: boolean;
+  method: string;
+  url: string;
+  headers: [string, string][];
+  body: string | null;
+  assertions: SuiteAssertion[];
+  extract: SuiteExtract[];
+}
+export interface Suite {
+  format: string;
+  version: number;
+  name: string;
+  variables: Record<string, string>;
+  environments: Record<string, Record<string, string>>;
+  requests: SuiteRequest[];
+}
+export interface SuiteAssertionResult {
+  description: string;
+  passed: boolean;
+  message: string | null;
+}
+export interface SuiteRequestResult {
+  name: string;
+  method: string;
+  url: string;
+  status: number | null;
+  duration_ms: number;
+  passed: boolean;
+  error: string | null;
+  assertions: SuiteAssertionResult[];
+  extracted: Record<string, string>;
+  skipped: boolean;
+}
+export interface SuiteReport {
+  suite: string;
+  environment: string | null;
+  duration_ms: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  results: SuiteRequestResult[];
+}
+
+export interface PluginSetting {
+  key: string;
+  label: string;
+  type: "string" | "number" | "boolean" | "select";
+  default?: unknown;
+  options: string[];
+  description: string;
+}
+export interface PluginTabInfo {
+  plugin: string;
+  plugin_name: string;
+  id: string;
+  name: string;
+}
+export type PluginTabContent =
+  | { type: "text"; content: string }
+  | { type: "markdown"; content: string }
+  | { type: "json"; content: unknown }
+  | { type: "table"; content: { columns: string[]; rows: unknown[][] } };
+export interface CatalogPlugin {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  provides: string[];
+  settings: boolean;
+  installed: string | null;
+  update: boolean;
 }
 
 export interface ScriptRule {
@@ -384,6 +534,19 @@ export const api = {
   installPlugin: (path: string) => invoke<PluginList>("install_plugin", { path }),
   setPluginEnabled: (id: string, enabled: boolean) => invoke<PluginList>("set_plugin_enabled", { id, enabled }),
   removePlugin: (id: string) => invoke<PluginList>("remove_plugin", { id }),
+  importOpenapi: (path: string, host: string | null) => invoke<ImportedSpec>("import_openapi", { path, host }),
+  validateOpenapi: (path: string, ids: FlowId[] | null) => invoke<ContractReport>("validate_openapi", { path, ids }),
+  addMockFromFlow: (id: FlowId) => invoke<number>("add_mock_from_flow", { id }),
+  suiteFromFlows: (ids: FlowId[], name?: string) => invoke<Suite>("suite_from_flows", { ids, name: name ?? null }),
+  openSuite: (path: string) => invoke<Suite>("open_suite", { path }),
+  saveSuite: (path: string, suite: Suite) => invoke<void>("save_suite", { path, suite }),
+  exportSuiteJunit: (path: string, report: SuiteReport) => invoke<void>("export_suite_junit", { path, report }),
+  runSuite: (suite: Suite, environment: string | null, viaProxy: boolean, baseDir: string | null) =>
+    invoke<SuiteReport>("run_suite", { suite, environment, viaProxy, baseDir }),
+  pluginTabContent: (id: FlowId, plugin: string, tab: string) => invoke<PluginTabContent>("plugin_tab_content", { id, plugin, tab }),
+  setPluginSettings: (id: string, values: Record<string, unknown>) => invoke<void>("set_plugin_settings", { id, values }),
+  pluginCatalog: () => invoke<{ plugins: CatalogPlugin[] }>("plugin_catalog"),
+  installCatalogPlugin: (id: string) => invoke<void>("install_catalog_plugin", { id }),
   getMcpInfo: () => invoke<McpInfo>("get_mcp_info"),
   setMcp: (enabled: boolean, port: number, allowChanges: boolean) => invoke<McpInfo>("set_mcp", { enabled, port, allowChanges }),
   regenerateMcpToken: () => invoke<McpInfo>("regenerate_mcp_token"),
@@ -408,7 +571,9 @@ export const api = {
   codeLanguages: () => invoke<LanguageInfo[]>("code_languages"),
   generateCode: (id: FlowId, language: string) => invoke<string>("generate_code", { id, language }),
   queryBody: (id: FlowId, part: "request" | "response", expr: string) => invoke<unknown[]>("query_body", { id, part, expr }),
-  saveSession: (path: string, ids: FlowId[] | null) => invoke<number>("save_session", { path, ids }),
+  saveSession: (path: string, ids: FlowId[] | null, redacted = false) => invoke<number>("save_session", { path, ids, redacted }),
+  exportWorkspace: (path: string, redact: boolean) => invoke<WorkspaceSummary>("export_workspace", { path, redact }),
+  importWorkspace: (path: string, merge: boolean) => invoke<WorkspaceSummary>("import_workspace", { path, merge }),
   openSession: (path: string, append: boolean) => invoke<number>("open_session", { path, append }),
   recentSessions: () => invoke<RecentSession[]>("recent_sessions"),
   forgetRecentSession: (path: string) => invoke<void>("forget_recent_session", { path }),
@@ -464,7 +629,7 @@ export function base64ToText(b64: string): string | null {
 
 export function emptyRules(): RuleSet {
   return {
-    tools: { block: true, map_local: true, map_remote: true, rewrite: true, breakpoints: true, scripts: true, dns: true, reverse: true },
+    tools: { block: true, map_local: true, map_remote: true, rewrite: true, breakpoints: true, scripts: true, dns: true, reverse: true, mocks: true },
     block: [],
     record_only: { enabled: false, matchers: [] },
     map_local: [],
@@ -472,6 +637,7 @@ export function emptyRules(): RuleSet {
     rewrite: [],
     breakpoints: [],
     scripts: [],
+    mocks: [],
     proto_mappings: [],
     throttle: { enabled: false, profile: { name: "Custom", latency_ms: 0, download_kbps: 0, upload_kbps: 0 }, matchers: [] },
     dns: [],
