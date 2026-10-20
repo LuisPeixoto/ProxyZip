@@ -23,6 +23,7 @@
   <a href="#features">Features</a> ·
   <a href="docs/getting-started.md">Getting started</a> ·
   <a href="docs/scripting.md">Scripting</a> ·
+  <a href="docs/mcp.md">AI assistants</a> ·
   <a href="docs/cli.md">CLI</a> ·
   <a href="docs/architecture.md">Architecture</a> ·
   <a href="docs/roadmap.md">Roadmap</a> ·
@@ -44,7 +45,9 @@ It ships as a native desktop app and as a scriptable command-line tool, and both
   bodies, throttle the network and more, all without touching your code.
 - **Fast with huge sessions.** A virtualized list stays smooth with tens of thousands of requests.
 - **Made to be understood.** JSON tree, **Protobuf, gRPC, GraphQL, MessagePack** and live **SSE** viewers, jq filters, Diff, timing breakdown, TLS details.
-- **Scriptable.** Change requests and responses with a few lines of JavaScript, with a one-click test run.
+- **Scriptable and extensible.** Change requests and responses with a few lines of JavaScript, or add viewers, hooks and “copy as” formats with [plugins](docs/plugins.md).
+- **Works with your AI assistant.** An [MCP server](docs/mcp.md) lets Claude Code, Cursor and VS Code list, search and explain your captures.
+- **Every device.** Guided setup for iPhone and iPad, Android, Java, Firefox and any terminal, plus HTTP/2, [HTTP/3](docs/http3.md) and WebSocket.
 - **Zero-friction setup.** One click installs the certificate and routes your system through ProxyZip. One command
   does the same for a terminal.
 - **Honest errors.** When a client rejects the certificate or a server fails, you get a failed flow with an explanation
@@ -163,12 +166,41 @@ Details and examples are in [Tools](docs/tools.md). The same rules work from the
 
 Details are in [Inspecting bodies](docs/inspecting.md) and [Sessions](docs/sessions.md).
 
+## Connect anything
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>Devices and runtimes</h3>
+      <p>The <b>Devices</b> window checks what is done and offers a button for each step: iPhone and iPad (profile and QR
+      code), the iOS Simulator, Android emulators and devices over <code>adb</code>, Java trust stores and Firefox
+      profiles. <code>proxyzip env</code> and <code>proxyzip terminal</code> route curl, Node.js, Python, Ruby, Go, Git,
+      Cargo and more. See <a href="docs/devices.md">Devices</a>.</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3>AI assistants</h3>
+      <p>Turn on <b>Settings → AI assistants</b> and your assistant can list requests with the same filter syntax as the
+      app, read decoded bodies, run jq filters and generate code. Local only, token protected, off by default. See
+      <a href="docs/mcp.md">AI assistants</a>.</p>
+    </td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/images/devices.png" alt="The Devices window with an Android emulator ready to capture" />
+</p>
+
 ## Install
 
 ### Desktop app
 
 Download the installer for your platform from the [latest release](https://github.com/LuisPeixoto/ProxyZip/releases):
 `.dmg` (macOS), `.msi` / `.exe` (Windows), `.AppImage`, `.deb` or `.rpm` (Linux).
+
+### Package managers
+
+Homebrew, Scoop and winget manifests are generated with every release (see [Releasing](docs/distribution.md)).
+Until the taps and buckets are published, use the installers above. The desktop app updates itself.
 
 ### Build from source
 
@@ -239,6 +271,11 @@ Terms combine with AND. See [Filtering](docs/filtering.md) for the full referenc
 | [Getting started](docs/getting-started.md) | First capture on a computer, phone or emulator |
 | [Certificates](docs/certificates.md) | How the CA works and how to trust it on every platform |
 | [Tools](docs/tools.md) | Breakpoints, Map Local and Remote, Rewrite, Throttling and the rest, with the rules file format |
+| [Devices](docs/devices.md) | iPhone, Android, Java, Firefox and terminal setup |
+| [AI assistants](docs/mcp.md) | The MCP server: setup for each client, tools and security |
+| [Plugins](docs/plugins.md) | Write hooks, viewers and “copy as” formats |
+| [HTTP/3](docs/http3.md) | Alt-Svc handling, HTTP/3 to servers and an HTTP/3 reverse proxy |
+| [Releasing](docs/distribution.md) | Signing, updates and package managers (for maintainers) |
 | [Scripting](docs/scripting.md) | The JavaScript API, helpers, limits and examples |
 | [Inspecting bodies](docs/inspecting.md) | Viewers, Protobuf and gRPC, jq, Diff and code generation |
 | [Sessions](docs/sessions.md) | Save, open and export captures |
@@ -256,11 +293,12 @@ crates/
   proxyzip-proxy        tokio + hyper engine: CONNECT, TLS interception, HTTP/1.1, HTTP/2, WebSocket
   proxyzip-tls          Root CA, per-host certificates, TLS key logging
   proxyzip-rules        Rule model and engine: block, map, rewrite, breakpoints, throttling, DNS and more
-  proxyzip-script       QuickJS scripting runtime with time and memory limits
+  proxyzip-script       QuickJS scripting and plugin runtime with time and memory limits
+  proxyzip-mcp          MCP server for AI assistants
   proxyzip-codec        Content decoding, classification, and the Protobuf, gRPC, MessagePack, SSE, GraphQL and jq viewers
   proxyzip-export       HAR, sessions, CSV, Postman and code generation
   proxyzip-sysproxy     Operating-system proxy settings
-  proxyzip-certinstall  Operating-system trust stores
+  proxyzip-certinstall  Trust stores, Firefox, Android and Java setup, iOS profile, terminal environment
   proxyzip-cli          The `proxyzip` command
 apps/desktop
   src-tauri             Tauri 2 shell (Rust)
