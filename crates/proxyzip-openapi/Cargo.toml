@@ -1,0 +1,22 @@
+[package]
+name = "proxyzip-openapi"
+description = "OpenAPI 3 support for ProxyZip: generate mock servers and check captured traffic against a specification"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+jsonschema = { version = "0.59", default-features = false }
+proxyzip-codec.workspace = true
+proxyzip-core.workspace = true
+proxyzip-rules.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml_ng = "0.10"
+url.workspace = true
+
+[dev-dependencies]
+bytes.workspace = true
