@@ -136,7 +136,7 @@ impl Worker {
             if !already_loaded {
                 // The source is wrapped in a function so each script has its own scope and globals do not leak.
                 let code = format!(
-                    "__register({id:?}, function () {{\n{source}\n;return {{ onRequest: typeof onRequest === 'function' ? onRequest : undefined, onResponse: typeof onResponse === 'function' ? onResponse : undefined, decode: typeof decode === 'function' ? decode : undefined, generate: typeof generate === 'function' ? generate : undefined }};\n}});"
+                    "__register({id:?}, function () {{\n{source}\n;return {{ onRequest: typeof onRequest === 'function' ? onRequest : undefined, onResponse: typeof onResponse === 'function' ? onResponse : undefined, decode: typeof decode === 'function' ? decode : undefined, generate: typeof generate === 'function' ? generate : undefined, render: typeof render === 'function' ? render : undefined }};\n}});"
                 );
                 ctx.eval::<(), _>(code).map_err(|e| describe(&ctx, e))?;
                 registered = true;
