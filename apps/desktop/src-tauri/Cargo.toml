@@ -19,6 +19,7 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 anyhow.workspace = true
 base64.workspace = true
 bytes.workspace = true
@@ -27,6 +28,7 @@ proxyzip-certinstall.workspace = true
 proxyzip-codec.workspace = true
 proxyzip-core.workspace = true
 proxyzip-export.workspace = true
+proxyzip-mcp.workspace = true
 proxyzip-proxy.workspace = true
 proxyzip-rules.workspace = true
 proxyzip-script.workspace = true
@@ -42,3 +44,5 @@ tauri-plugin-opener = "2"
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+tauri-plugin-updater = "2.14.0"
+tauri-plugin-process = "2.4.0"
