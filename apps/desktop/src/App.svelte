@@ -8,6 +8,9 @@
   import OpenSessionDialog from "./lib/components/OpenSessionDialog.svelte";
   import BreakpointEditor from "./lib/components/BreakpointEditor.svelte";
   import Composer from "./lib/components/Composer.svelte";
+  import UpdateBanner from "./lib/components/UpdateBanner.svelte";
+  import { checkForUpdate } from "./lib/updater";
+  import SetupModal from "./lib/components/setup/SetupModal.svelte";
   import ToolsPanel from "./lib/components/ToolsPanel.svelte";
   import Toolbar from "./lib/components/Toolbar.svelte";
   import Sidebar from "./lib/components/Sidebar.svelte";
@@ -22,6 +25,16 @@
 
   onMount(() => {
     app.init();
+    // Look for a newer release a few seconds after launch, without getting in the way.
+    const timer = setTimeout(async () => {
+      try {
+        const prefs = await api.getSettings();
+        if (prefs.check_updates) await checkForUpdate(true);
+      } catch {
+        /* offline or no release yet */
+      }
+    }, 5000);
+    return () => clearTimeout(timer);
   });
 
   $effect(() => {
@@ -104,6 +117,8 @@
 
 {#if app.settingsOpen}<SettingsModal />{/if}
 {#if app.toolsOpen}<ToolsPanel />{/if}
+{#if app.setupOpen}<SetupModal />{/if}
+<UpdateBanner />
 {#if app.composer}<Composer />{/if}
 {#if app.codeFor != null}<CodeModal />{/if}
 {#if app.diff}<DiffModal />{/if}

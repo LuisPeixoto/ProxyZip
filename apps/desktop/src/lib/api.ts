@@ -135,6 +135,40 @@ export interface Preferences {
   insecure_upstream: boolean;
   max_flows: number;
   restore_last_session: boolean;
+  mcp_enabled: boolean;
+  mcp_port: number;
+  mcp_allow_changes: boolean;
+  check_updates: boolean;
+  strip_alt_svc: boolean;
+  http3_upstream: boolean;
+}
+
+export interface PluginInfo {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  enabled: boolean;
+  contributes: {
+    hooks: { pattern: string; request: boolean; response: boolean } | null;
+    viewers: { id: string; name: string }[];
+    copy_as: { id: string; name: string }[];
+  };
+}
+export interface PluginList {
+  plugins: PluginInfo[];
+  errors: { folder: string; message: string }[];
+  dir: string;
+}
+export interface McpInfo {
+  enabled: boolean;
+  port: number;
+  running: boolean;
+  url: string;
+  token: string;
+  allow_changes: boolean;
+  error: string | null;
 }
 
 // ---- Rules -----------------------------------------------------------------------------------------------------------
@@ -219,6 +253,7 @@ export interface ReverseRule {
   enabled: boolean;
   listen_port: number;
   target: string;
+  h3?: boolean;
 }
 export interface RuleSet {
   tools: {
@@ -265,6 +300,29 @@ export interface ProtoInfo {
   files: string[];
   messages: string[];
   methods: string[];
+}
+export interface JavaInfo {
+  found: boolean;
+  truststore: string | null;
+  store_type: string | null;
+  password: string;
+  options: string | null;
+}
+export interface FirefoxReport {
+  profiles: string[];
+  imported: number;
+  notes: string[];
+}
+export interface IosInfo {
+  proxy: string | null;
+  page: string | null;
+  qr_svg: string | null;
+}
+export interface AndroidDevice {
+  serial: string;
+  state: string;
+  model: string | null;
+  emulator: boolean;
 }
 export interface LanguageInfo {
   id: string;
@@ -321,7 +379,21 @@ export const api = {
   copyAsCurl: (id: FlowId) => invoke<string>("copy_as_curl", { id }),
   exportHar: (path: string, ids: FlowId[] | null) => invoke<number>("export_har", { path, ids }),
   importHar: (path: string) => invoke<number>("import_har", { path }),
-  terminalEnv: () => invoke<string>("terminal_env"),
+  terminalEnv: (shell?: string) => invoke<string>("terminal_env", { shell: shell ?? null }),
+  listPlugins: () => invoke<PluginList>("list_plugins"),
+  installPlugin: (path: string) => invoke<PluginList>("install_plugin", { path }),
+  setPluginEnabled: (id: string, enabled: boolean) => invoke<PluginList>("set_plugin_enabled", { id, enabled }),
+  removePlugin: (id: string) => invoke<PluginList>("remove_plugin", { id }),
+  getMcpInfo: () => invoke<McpInfo>("get_mcp_info"),
+  setMcp: (enabled: boolean, port: number, allowChanges: boolean) => invoke<McpInfo>("set_mcp", { enabled, port, allowChanges }),
+  regenerateMcpToken: () => invoke<McpInfo>("regenerate_mcp_token"),
+  openTerminal: () => invoke<void>("open_terminal"),
+  javaSetup: () => invoke<JavaInfo>("java_setup"),
+  installFirefox: () => invoke<FirefoxReport>("install_firefox"),
+  iosSetup: () => invoke<IosInfo>("ios_setup"),
+  androidDevices: () => invoke<AndroidDevice[]>("android_devices"),
+  androidSetProxy: (serial: string, enable: boolean) => invoke<void>("android_set_proxy", { serial, enable }),
+  androidInstallCert: (serial: string, system: boolean) => invoke<string>("android_install_cert", { serial, system }),
   repeatFlow: (id: FlowId) => invoke<void>("repeat_flow", { id }),
   sendRequest: (request: ComposeInput) => invoke<number>("send_request", { request }),
   parseCurl: (command: string) => invoke<ComposeInput>("parse_curl", { command }),

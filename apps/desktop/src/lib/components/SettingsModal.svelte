@@ -4,12 +4,24 @@
   import { api, type Preferences } from "../api";
   import { copy } from "../actions";
   import Icon from "./Icon.svelte";
+  import AssistantsSection from "./AssistantsSection.svelte";
+  import PluginsSection from "./PluginsSection.svelte";
+  import { appVersion, checkForUpdate, installUpdate } from "../updater";
 
   let prefs = $state<Preferences | null>(null);
   let include = $state("");
   let exclude = $state("");
   let saving = $state(false);
   let confirmRegen = $state(false);
+  let version = $state("");
+  let updateMessage = $state("");
+  appVersion().then((v) => (version = v));
+
+  async function checkNow() {
+    updateMessage = "Checking…";
+    const r = await checkForUpdate(false);
+    updateMessage = r.error ? `Could not check: ${r.error}` : r.update ? `Version ${r.update.version} is available.` : "You have the latest version.";
+  }
   const st = $derived(app.status);
 
   $effect(() => {
@@ -92,7 +104,35 @@
             <input id="port" type="number" min="1" max="65535" bind:value={prefs.port} class="h-8 w-32 rounded-lg border border-line bg-panel-2 px-2.5 outline-none focus:border-accent" />
             <span class="text-muted">Allow LAN connections</span>
             <label class="flex items-center gap-2"><input type="checkbox" bind:checked={prefs.allow_lan} class="accent-[var(--accent)]" /> Listen on all interfaces (phones, emulators, VMs)</label>
+            <span class="text-muted">HTTP/3 (QUIC)</span>
+            <div class="grid gap-1.5">
+              <label class="flex items-center gap-2"><input type="checkbox" bind:checked={prefs.strip_alt_svc} class="accent-[var(--accent)]" /> Hide HTTP/3 offers from clients <span class="text-faint">(keeps their traffic in ProxyZip)</span></label>
+              <label class="flex items-center gap-2"><input type="checkbox" bind:checked={prefs.http3_upstream} class="accent-[var(--accent)]" /> Use HTTP/3 to servers that offer it <span class="rounded bg-warn/15 px-1.5 text-[10.5px] text-warn">experimental</span></label>
+            </div>
           </div>
+        </section>
+
+        <section>
+          {@render section("AI assistants", "zap")}
+          <AssistantsSection onchange={(i) => prefs && (prefs = { ...prefs, mcp_enabled: i.enabled, mcp_port: i.port, mcp_allow_changes: i.allow_changes })} />
+        </section>
+
+        <section>
+          {@render section("About & updates", "info")}
+          <div class="rounded-xl border border-line bg-panel-2 p-4">
+            <div class="flex items-center gap-3">
+              <span class="font-medium">ProxyZip {version}</span>
+              <button onclick={checkNow} class="rounded-lg border border-line px-3 py-1.5 hover:bg-hover">Check for updates</button>
+              {#if app.update}<button onclick={installUpdate} class="rounded-lg bg-accent px-3 py-1.5 font-medium text-white hover:opacity-90">Install {app.update.version} & restart</button>{/if}
+              <span class="text-muted">{updateMessage}</span>
+            </div>
+            <label class="mt-3 flex items-center gap-2"><input type="checkbox" bind:checked={prefs.check_updates} class="accent-[var(--accent)]" /> Look for updates when ProxyZip starts</label>
+          </div>
+        </section>
+
+        <section>
+          {@render section("Plugins", "layers")}
+          <PluginsSection />
         </section>
 
         <section>

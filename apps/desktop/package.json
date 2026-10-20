@@ -1,7 +1,7 @@
 {
   "name": "proxyzip-desktop",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "ProxyZip desktop app: capture, inspect and debug HTTP(S) traffic",
   "author": "Luis Peixoto",
   "license": "MIT",
@@ -41,6 +41,8 @@
     "@tauri-apps/plugin-clipboard-manager": "^2",
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-process": "^2.4.0",
+    "@tauri-apps/plugin-updater": "^2.14.0",
     "codemirror": "^6.0.2"
   },
   "devDependencies": {

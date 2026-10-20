@@ -92,19 +92,12 @@
       </div>
     {/if}
 
-    <div class="mt-3 w-full rounded-2xl border border-line bg-panel-2 p-5">
-      <div class="flex items-start gap-3">
-        <span class="grid size-7 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent"><Icon name="smartphone" size={15} /></span>
-        <div class="text-[12px] leading-relaxed text-muted">
-          <div class="mb-1 text-[13px] font-semibold text-fg">Phones, tablets & emulators</div>
-          Enable <b class="text-fg">Allow LAN connections</b> in Settings, set the device's Wi-Fi HTTP proxy to
-          <span class="mono text-fg">{st?.lan_addresses[0] ?? "this computer's IP"}:{st?.port ?? 9393}</span>, then open
-          <span class="mono text-fg">http://proxyzip.cert</span> on the device to install the certificate.
-          {#if st?.platform === "macos"}
-            <button onclick={() => app.attempt(() => api.installCaIosSimulator(), "Installed into the booted iOS Simulator")} class="ml-1 text-accent hover:underline">Install into iOS Simulator →</button>
-          {/if}
-        </div>
+    <button onclick={() => (app.setupOpen = "ios")} class="mt-3 flex w-full items-start gap-3 rounded-2xl border border-line bg-panel-2 p-5 text-left hover:bg-hover">
+      <span class="grid size-7 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent"><Icon name="smartphone" size={15} /></span>
+      <div class="text-[12px] leading-relaxed text-muted">
+        <div class="mb-1 text-[13px] font-semibold text-fg">Phones, emulators, browsers & runtimes</div>
+        Guided setup for iPhone and iPad, Android, Firefox, Java, Node.js, Python and Ruby. Open <b class="text-fg">Devices & apps</b>.
       </div>
-    </div>
+    </button>
   </div>
 </div>
