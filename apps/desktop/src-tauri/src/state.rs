@@ -25,6 +25,17 @@ pub struct Preferences {
     pub max_flows: usize,
     /// Save the session when the app quits and load it again on the next launch.
     pub restore_last_session: bool,
+    /// Serve the captured traffic to AI assistants over MCP on `127.0.0.1:mcp_port`.
+    pub mcp_enabled: bool,
+    pub mcp_port: u16,
+    /// Let assistants change rules and clear traffic.
+    pub mcp_allow_changes: bool,
+    /// Look for a newer version on GitHub when the app starts.
+    pub check_updates: bool,
+    /// Remove HTTP/3 advertisements from responses so clients keep going through the proxy.
+    pub strip_alt_svc: bool,
+    /// Use HTTP/3 towards servers that advertise it (experimental).
+    pub http3_upstream: bool,
 }
 
 /// A session file the user saved or opened recently.
@@ -47,6 +58,12 @@ impl Default for Preferences {
             insecure_upstream: false,
             max_flows: 50_000,
             restore_last_session: false,
+            mcp_enabled: false,
+            mcp_port: 9395,
+            mcp_allow_changes: false,
+            check_updates: true,
+            strip_alt_svc: true,
+            http3_upstream: false,
         }
     }
 }
@@ -72,6 +89,8 @@ impl Preferences {
             recording,
             max_body_capture: self.max_body_capture_mb.max(1) * 1024 * 1024,
             insecure_upstream: self.insecure_upstream,
+            strip_alt_svc: self.strip_alt_svc,
+            http3_upstream: self.http3_upstream,
             rules,
         }
     }
@@ -106,6 +125,10 @@ fn last_session_path(home: &std::path::Path) -> PathBuf {
     home.join("last.pzsession")
 }
 
+pub fn plugins_dir(home: &std::path::Path) -> PathBuf {
+    home.join("plugins")
+}
+
 fn rules_path(home: &std::path::Path) -> PathBuf {
     home.join("rules.json")
 }
@@ -135,6 +158,12 @@ pub struct AppState {
     pub last_error: RwLock<Option<String>>,
     /// Set when *we* turned the system proxy on, so we restore it on exit.
     pub system_proxy_owned: RwLock<bool>,
+    /// The AI-assistants server, when it is on.
+    pub mcp: Mutex<Option<proxyzip_mcp::http::HttpHandle>>,
+    pub mcp_state: RwLock<Option<Arc<proxyzip_mcp::McpState>>>,
+    pub mcp_error: RwLock<Option<String>>,
+    /// Installed plugins (`<data>/plugins`).
+    pub plugins: RwLock<proxyzip_script::plugin::Registry>,
 }
 
 impl AppState {
@@ -155,6 +184,10 @@ impl AppState {
             listen: RwLock::new(None),
             last_error: RwLock::new(None),
             system_proxy_owned: RwLock::new(false),
+            mcp: Mutex::new(None),
+            mcp_state: RwLock::new(None),
+            mcp_error: RwLock::new(None),
+            plugins: RwLock::new(proxyzip_script::plugin::Registry::load(&plugins_dir(&home_for_rules))),
         };
         state.restore_last_session();
         if let Err(e) = state.start_proxy(true).await {
@@ -180,7 +213,7 @@ impl AppState {
             let port = prefs.port.saturating_add(offset);
             let config = ProxyConfig { listen: SocketAddr::from((ip, port)), ..Default::default() };
             let ca = self.ca.read().clone();
-            let settings = prefs.proxy_settings(recording, Arc::new(self.rules.read().clone()));
+            let settings = prefs.proxy_settings(recording, Arc::new(self.effective_rules(self.rules.read().clone())));
             match ProxyServer::start(config, settings, ca, self.store.clone()).await {
                 Ok(handle) => {
                     let addr = handle.local_addr;
@@ -197,13 +230,40 @@ impl AppState {
         Err(last.unwrap())
     }
 
+    /// The user's rules plus the traffic hooks of enabled plugins. Plugin hooks are never written to `rules.json`.
+    pub fn effective_rules(&self, mut rules: RuleSet) -> RuleSet {
+        use proxyzip_rules::{Matcher, ScriptRule};
+        for hook in self.plugins.read().hook_specs() {
+            let mut matcher = Matcher::new(hook.hooks.pattern.clone());
+            matcher.regex = hook.hooks.regex;
+            matcher.methods = hook.hooks.methods.clone();
+            rules.scripts.push(ScriptRule {
+                name: format!("plugin: {}", hook.name),
+                enabled: true,
+                matcher,
+                source: hook.source,
+                on_request: hook.hooks.request,
+                on_response: hook.hooks.response,
+            });
+        }
+        rules
+    }
+
+    /// Re-apply the rules after a plugin was installed, removed or switched.
+    pub async fn refresh_plugin_hooks(&self) {
+        let rules = self.rules.read().clone();
+        if let Some(handle) = self.proxy.lock().await.as_ref() {
+            let _ = handle.apply_rules(self.effective_rules(rules)).await;
+        }
+    }
+
     /// Push changed preferences into the running proxy without restarting it.
     pub async fn apply_live_settings(&self) {
         let prefs = self.prefs.read().clone();
         if let Some(h) = self.proxy.lock().await.as_ref() {
             let mut s = h.settings.write();
             let recording = s.recording;
-            *s = prefs.proxy_settings(recording, Arc::new(self.rules.read().clone()));
+            *s = prefs.proxy_settings(recording, Arc::new(self.effective_rules(self.rules.read().clone())));
         }
     }
 
@@ -213,7 +273,7 @@ impl AppState {
         std::fs::write(rules_path(&self.home), rules.to_json()?)?;
         *self.rules.write() = rules.clone();
         let errors = match self.proxy.lock().await.as_ref() {
-            Some(handle) => handle.apply_rules(rules).await,
+            Some(handle) => handle.apply_rules(self.effective_rules(rules)).await,
             None => Vec::new(),
         };
         *self.listener_errors.write() = errors.clone();
