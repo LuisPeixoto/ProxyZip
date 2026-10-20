@@ -33,6 +33,8 @@ pub(crate) struct Ctx {
     pub listen: SocketAddr,
     pub breakpoints: Arc<BreakpointHub>,
     pub scripts: Arc<ScriptEngine>,
+    pub h3: crate::h3::H3Client,
+    pub altsvc: crate::altsvc::AltSvcCache,
 }
 
 /// What we know about the client connection a request arrived on.
@@ -76,8 +78,18 @@ impl ReverseTarget {
 /// Listeners that run next to the main one and follow the rules.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum ExtraListener {
-    Reverse { port: u16, target: String },
-    Socks { port: u16 },
+    Reverse {
+        port: u16,
+        target: String,
+    },
+    /// The same reverse proxy over HTTP/3 (UDP).
+    ReverseH3 {
+        port: u16,
+        target: String,
+    },
+    Socks {
+        port: u16,
+    },
 }
 
 struct Running {
@@ -86,11 +98,13 @@ struct Running {
 }
 
 fn desired_listeners(rules: &RuleSet) -> Vec<ExtraListener> {
-    let mut wanted: Vec<_> = rules
-        .active_reverse()
-        .into_iter()
-        .map(|r| ExtraListener::Reverse { port: r.listen_port, target: r.target.clone() })
-        .collect();
+    let mut wanted = Vec::new();
+    for r in rules.active_reverse() {
+        wanted.push(ExtraListener::Reverse { port: r.listen_port, target: r.target.clone() });
+        if r.h3 {
+            wanted.push(ExtraListener::ReverseH3 { port: r.listen_port, target: r.target.clone() });
+        }
+    }
     if rules.socks.enabled && rules.socks.port != 0 {
         wanted.push(ExtraListener::Socks { port: rules.socks.port });
     }
@@ -162,6 +176,8 @@ impl ProxyServer {
             ca,
             settings: settings.clone(),
             upstream: Upstream::new(&config, keylog.clone(), settings.clone()),
+            h3: crate::h3::H3Client::new(&config, keylog.clone()),
+            altsvc: crate::altsvc::AltSvcCache::default(),
             keylog,
             listen: local_addr,
             breakpoints: breakpoints.clone(),
@@ -279,10 +295,16 @@ async fn sync_listeners(
 }
 
 async fn spawn_extra(ctx: Arc<Ctx>, kind: ExtraListener) -> Result<Running, String> {
+    if let ExtraListener::ReverseH3 { port, target } = &kind {
+        let target = Arc::new(ReverseTarget::parse(target)?);
+        let addr = SocketAddr::new(ctx.listen.ip(), *port);
+        return crate::h3::serve_reverse(ctx, addr, target).await.map(|(shutdown, task)| Running { shutdown, task });
+    }
     let (port, label, reverse) = match &kind {
         ExtraListener::Reverse { port, target } => {
             (*port, format!("reverse proxy on port {port}"), Some(Arc::new(ReverseTarget::parse(target)?)))
         }
+        ExtraListener::ReverseH3 { .. } => unreachable!("handled above"),
         ExtraListener::Socks { port } => (*port, format!("SOCKS5 listener on port {port}"), None),
     };
     let addr = SocketAddr::new(ctx.listen.ip(), port);

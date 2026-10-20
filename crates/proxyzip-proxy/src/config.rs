@@ -58,6 +58,10 @@ pub struct ProxySettings {
     pub max_body_capture: usize,
     /// Skip upstream certificate verification (debugging self-signed servers).
     pub insecure_upstream: bool,
+    /// Remove HTTP/3 advertisements (`Alt-Svc: h3`) from responses, so clients keep using the proxy instead of QUIC.
+    pub strip_alt_svc: bool,
+    /// Talk HTTP/3 to servers that advertise it (experimental).
+    pub http3_upstream: bool,
     /// Block, map, rewrite, breakpoint, throttle and network rules. Cheap to clone.
     pub rules: Arc<RuleSet>,
 }
@@ -69,6 +73,8 @@ impl Default for ProxySettings {
             recording: true,
             max_body_capture: 32 * 1024 * 1024,
             insecure_upstream: false,
+            strip_alt_svc: true,
+            http3_upstream: false,
             rules: Arc::default(),
         }
     }

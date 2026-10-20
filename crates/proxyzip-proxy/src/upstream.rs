@@ -29,8 +29,8 @@ use tower_service::Service;
 use crate::config::{ProxyConfig, ProxySettings};
 use crate::util::format_authority;
 
-type BoxError = Box<dyn std::error::Error + Send + Sync>;
-type Settings = Arc<RwLock<ProxySettings>>;
+use crate::util::BoxError;
+pub(crate) type Settings = Arc<RwLock<ProxySettings>>;
 
 pub type UpstreamClient = Client<HttpsConnector<ProxyConnector>, Full<Bytes>>;
 
@@ -148,16 +148,7 @@ pub struct Upstream {
 
 impl Upstream {
     pub fn new(config: &ProxyConfig, keylog: Option<Arc<dyn rustls::KeyLog>>, settings: Settings) -> Self {
-        let mut roots = RootCertStore::empty();
-        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        let native = rustls_native_certs::load_native_certs();
-        for cert in native.certs {
-            let _ = roots.add(cert);
-        }
-        for cert in &config.extra_upstream_roots {
-            let _ = roots.add(cert.clone());
-        }
-        let roots = Arc::new(roots);
+        let roots = root_store(config);
 
         let make = |insecure: bool, h2: bool| {
             let mut tls = if insecure {
@@ -198,8 +189,22 @@ impl Upstream {
     }
 }
 
+/// The roots trusted when connecting to servers: the built-in list, the system's and the configured extras.
+pub(crate) fn root_store(config: &ProxyConfig) -> Arc<RootCertStore> {
+    let mut roots = RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let native = rustls_native_certs::load_native_certs();
+    for cert in native.certs {
+        let _ = roots.add(cert);
+    }
+    for cert in &config.extra_upstream_roots {
+        let _ = roots.add(cert.clone());
+    }
+    Arc::new(roots)
+}
+
 #[derive(Debug)]
-struct AcceptAnyCert;
+pub(crate) struct AcceptAnyCert;
 
 impl ServerCertVerifier for AcceptAnyCert {
     fn verify_server_cert(

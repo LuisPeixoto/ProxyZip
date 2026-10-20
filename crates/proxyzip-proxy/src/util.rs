@@ -4,7 +4,13 @@ use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
 use proxyzip_core::Headers;
 
-pub type ProxyBody = BoxBody<Bytes, hyper::Error>;
+pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+/// A response body from an upstream server, whichever protocol it came over.
+pub type UpBody = BoxBody<Bytes, BoxError>;
+
+/// A body that is sent to a client. The error is boxed so bodies from hyper and from HTTP/3 can share one type.
+pub type ProxyBody = BoxBody<Bytes, BoxError>;
 
 pub fn full(bytes: impl Into<Bytes>) -> ProxyBody {
     Full::new(bytes.into()).map_err(|never| match never {}).boxed()

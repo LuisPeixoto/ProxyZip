@@ -9,7 +9,6 @@ use bytes::Bytes;
 use http::header::HeaderValue;
 use http_body::{Body, Frame, SizeHint};
 use http_body_util::{BodyExt, Full};
-use hyper::body::Incoming;
 use hyper::{Request, Response, StatusCode};
 use proxyzip_core::{BreakpointPhase, FlowId, FlowState, FlowStore, Headers, LogLine, Scheme, now_ms};
 use proxyzip_rules::{
@@ -22,8 +21,8 @@ use crate::breakpoint::{Decision, RequestEdit, ResponseEdit};
 use crate::server::{Conn, Ctx};
 use crate::throttle::ThrottledBody;
 use crate::util::{
-    ConnectionDropped, ProxyBody, authority_for, format_authority, full, is_websocket_upgrade, split_authority,
-    strip_hop_by_hop, to_header_map, to_headers, version_str,
+    BoxError, ConnectionDropped, ProxyBody, UpBody, authority_for, format_authority, full, is_websocket_upgrade,
+    split_authority, strip_hop_by_hop, to_header_map, to_headers, version_str,
 };
 use crate::{local, websocket};
 
@@ -40,7 +39,7 @@ fn default_port(scheme: Scheme) -> u16 {
     if scheme.is_secure() { 443 } else { 80 }
 }
 
-fn resolve_target(req: &Request<Incoming>, conn: &Conn) -> Option<Target> {
+fn resolve_target<B>(req: &Request<B>, conn: &Conn) -> Option<Target> {
     let path = req.uri().path_and_query().map(|p| p.as_str().to_string()).unwrap_or_else(|| "/".into());
     if let Some(reverse) = &conn.reverse {
         let request_path = req.uri().path_and_query().map_or("/", |p| p.as_str());
@@ -98,7 +97,11 @@ fn flow_scheme(websocket: bool, secure: bool) -> Scheme {
     }
 }
 
-pub(crate) async fn forward(mut req: Request<Incoming>, ctx: Arc<Ctx>, conn: Conn) -> Reply {
+pub(crate) async fn forward<B>(mut req: Request<B>, ctx: Arc<Ctx>, conn: Conn) -> Reply
+where
+    B: http_body::Body<Data = Bytes> + Send + 'static,
+    B::Error: std::fmt::Display,
+{
     let Some(mut target) = resolve_target(&req, &conn) else {
         return Ok(error_response(StatusCode::BAD_REQUEST, "ProxyZip: request has no target host"));
     };
@@ -299,45 +302,90 @@ pub(crate) async fn forward(mut req: Request<Incoming>, ctx: Arc<Ctx>, conn: Con
             tokio::time::sleep(delay).await;
         }
     }
-    let client = ctx.upstream.pick(settings.insecure_upstream, websocket);
-    let mut response = match client.request(upstream_req).await {
-        Ok(r) => r,
-        Err(e) => {
-            let mut msg = format!("upstream request to {uri} failed: {e}");
-            let mut source = std::error::Error::source(&e);
-            while let Some(s) = source {
-                msg.push_str(&format!(": {s}"));
-                source = s.source();
+    // A server that advertised HTTP/3 gets it, unless an upstream proxy is in the way (QUIC cannot go through one).
+    let h3_alt = (settings.http3_upstream
+        && !websocket
+        && target.scheme.is_secure()
+        && settings.rules.upstream_for(&target.host).is_none())
+    .then(|| ctx.altsvc.lookup(&target.host, target.port))
+    .flatten();
+    let mut h3_response: Option<Response<UpBody>> = None;
+    if let Some((alt_host, alt_port)) = h3_alt {
+        let mut h3_req = Request::builder().method(upstream_req.method().clone()).uri(upstream_req.uri().clone());
+        for (k, v) in upstream_req.headers() {
+            h3_req = h3_req.header(k, v);
+        }
+        let h3_body = upstream_req.body().clone();
+        if let Ok(h3_req) = h3_req.body(h3_body) {
+            match ctx.h3.send(&ctx.settings, &alt_host, alt_port, settings.insecure_upstream, h3_req).await {
+                Ok(r) => h3_response = Some(r),
+                Err(e) => {
+                    tracing::debug!(host = %target.host, error = %e, "HTTP/3 failed; using TCP");
+                    ctx.altsvc.mark_broken(&target.host, target.port);
+                    if let crate::h3::H3Error::Request(message) = e {
+                        guard.id = None;
+                        return Ok(fail(
+                            &ctx.store,
+                            flow_id,
+                            StatusCode::BAD_GATEWAY,
+                            format!("HTTP/3 request to {uri} failed: {message}"),
+                        ));
+                    }
+                }
             }
+        }
+    }
+    let response: Response<UpBody> = match h3_response {
+        Some(r) => {
             guard.id = None;
-            return Ok(fail(&ctx.store, flow_id, StatusCode::BAD_GATEWAY, msg));
+            r
+        }
+        None => {
+            let client = ctx.upstream.pick(settings.insecure_upstream, websocket);
+            let mut response = match client.request(upstream_req).await {
+                Ok(r) => r,
+                Err(e) => {
+                    let mut msg = format!("upstream request to {uri} failed: {e}");
+                    let mut source = std::error::Error::source(&e);
+                    while let Some(s) = source {
+                        msg.push_str(&format!(": {s}"));
+                        source = s.source();
+                    }
+                    guard.id = None;
+                    return Ok(fail(&ctx.store, flow_id, StatusCode::BAD_GATEWAY, msg));
+                }
+            };
+            guard.id = None;
+
+            let status = response.status();
+            if status == StatusCode::SWITCHING_PROTOCOLS
+                && let Some(client_upgrade) = client_upgrade
+            {
+                if let Some(id) = flow_id {
+                    record_head(
+                        &ctx.store,
+                        id,
+                        status.as_u16(),
+                        &to_headers(response.headers()),
+                        &version_str(response.version()),
+                    );
+                    ctx.store.update(id, |f| f.state = FlowState::WebSocketOpen);
+                }
+                let server_upgrade = hyper::upgrade::on(&mut response);
+                let mut out = Response::builder().status(StatusCode::SWITCHING_PROTOCOLS);
+                *out.headers_mut().unwrap() = response.headers().clone();
+                tokio::spawn(websocket::relay(client_upgrade, server_upgrade, ctx.store.clone(), flow_id));
+                return Ok(out.body(full("")).unwrap());
+            }
+            response.map(|b| b.map_err(|e| -> BoxError { Box::new(e) }).boxed())
         }
     };
-    guard.id = None;
-
-    let status = response.status();
-    if status == StatusCode::SWITCHING_PROTOCOLS
-        && let Some(client_upgrade) = client_upgrade
-    {
-        if let Some(id) = flow_id {
-            record_head(
-                &ctx.store,
-                id,
-                status.as_u16(),
-                &to_headers(response.headers()),
-                &version_str(response.version()),
-            );
-            ctx.store.update(id, |f| f.state = FlowState::WebSocketOpen);
-        }
-        let server_upgrade = hyper::upgrade::on(&mut response);
-        let mut out = Response::builder().status(StatusCode::SWITCHING_PROTOCOLS);
-        *out.headers_mut().unwrap() = response.headers().clone();
-        tokio::spawn(websocket::relay(client_upgrade, server_upgrade, ctx.store.clone(), flow_id));
-        return Ok(out.body(full("")).unwrap());
-    }
 
     let version = version_str(response.version());
     let (mut rparts, rbody) = response.into_parts();
+    if settings.http3_upstream && target.scheme.is_secure() {
+        ctx.altsvc.learn(&target.host, target.port, &rparts.headers);
+    }
     if plan.needs_response_body() {
         let script_request = (!plan.response_scripts.is_empty()).then(|| ScriptRequest {
             method: req_parts.method.clone(),
@@ -368,6 +416,9 @@ pub(crate) async fn forward(mut req: Request<Incoming>, ctx: Arc<Ctx>, conn: Con
         record_head(&ctx.store, id, rparts.status.as_u16(), &to_headers(&rparts.headers), &version);
     }
     strip_hop_by_hop(&mut rparts.headers);
+    if settings.strip_alt_svc {
+        crate::altsvc::strip_h3(&mut rparts.headers);
+    }
     let live = rparts
         .headers
         .get(http::header::CONTENT_TYPE)
@@ -406,7 +457,7 @@ async fn buffered_response(
     ctx: &Arc<Ctx>,
     context: &ResponseContext<'_>,
     rparts: http::response::Parts,
-    rbody: Incoming,
+    rbody: UpBody,
 ) -> Reply {
     let ResponseContext { flow_id, plan, settings, version, script_request } = *context;
     let body = match rbody.collect().await {
@@ -461,6 +512,9 @@ async fn buffered_response(
 
     let mut headers = to_header_map(&res.headers);
     strip_hop_by_hop(&mut headers);
+    if settings.strip_alt_svc {
+        crate::altsvc::strip_h3(&mut headers);
+    }
     headers.remove(http::header::CONTENT_LENGTH);
     let body = match plan.throttle.as_ref().and_then(|t| t.download_bytes_per_sec()) {
         Some(rate) => ThrottledBody::new(full(res.body), rate).boxed(),
@@ -783,7 +837,7 @@ impl Drop for PendingGuard {
 
 /// Streams the upstream body to the client while keeping a (bounded) copy.
 struct TapBody {
-    inner: Incoming,
+    inner: UpBody,
     buf: Vec<u8>,
     cap: usize,
     truncated: bool,
@@ -839,9 +893,9 @@ impl TapBody {
 
 impl Body for TapBody {
     type Data = Bytes;
-    type Error = hyper::Error;
+    type Error = BoxError;
 
-    fn poll_frame(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Bytes>, hyper::Error>>> {
+    fn poll_frame(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Bytes>, BoxError>>> {
         match Pin::new(&mut self.inner).poll_frame(cx) {
             Poll::Ready(Some(Ok(frame))) => {
                 if let Some(data) = frame.data_ref() {

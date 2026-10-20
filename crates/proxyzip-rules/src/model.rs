@@ -432,11 +432,13 @@ pub struct ReverseRule {
     pub listen_port: u16,
     /// Full URL such as `https://api.example.com/v1`.
     pub target: String,
+    /// Also accept HTTP/3 (QUIC) on the same port number over UDP, with a certificate from the ProxyZip CA.
+    pub h3: bool,
 }
 
 impl Default for ReverseRule {
     fn default() -> Self {
-        Self { name: String::new(), enabled: true, listen_port: 0, target: String::new() }
+        Self { name: String::new(), enabled: true, listen_port: 0, target: String::new(), h3: false }
     }
 }
 
