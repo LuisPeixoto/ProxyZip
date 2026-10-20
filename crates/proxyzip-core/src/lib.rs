@@ -7,6 +7,7 @@
 mod filter;
 mod flow;
 mod store;
+pub mod template;
 
 pub use filter::Filter;
 pub use flow::*;
