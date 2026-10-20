@@ -47,18 +47,33 @@ release as `package-manifests.zip`. Publishing them is a manual, one-time setup 
 
 | Channel | One-time setup | Each release |
 |---------|----------------|--------------|
-| Homebrew | Create a tap repository `LuisPeixoto/homebrew-proxyzip` | Copy `homebrew/proxyzip.rb` (cask) and `homebrew/proxyzip-cli.rb` (formula) into it |
-| Scoop | Create a bucket repository `LuisPeixoto/scoop-proxyzip` | Copy `scoop/proxyzip.json` (it has `checkver` and `autoupdate`, so Scoop's own tooling can do this) |
+| Homebrew | Done: [`homebrew-proxyzip`](https://github.com/LuisPeixoto/homebrew-proxyzip) | Automatic (`Casks/proxyzip.rb` and `Formula/proxyzip-cli.rb`) |
+| Scoop | Done: [`scoop-proxyzip`](https://github.com/LuisPeixoto/scoop-proxyzip) | Automatic (`bucket/proxyzip.json`) |
 | winget | Fork `microsoft/winget-pkgs` | Put the three files of `winget/` under `manifests/p/ProxyZip/ProxyZip/<version>/` and open a pull request |
 | Flathub | Follow Flathub's submission process for `dev.proxyzip.app` | Update the manifest's URL and checksum |
 
-Users then install with, for example, `brew install --cask LuisPeixoto/proxyzip/proxyzip`,
+The Homebrew tap and the Scoop bucket exist and are updated by the `publish-packages` workflow (below). Users install with, for example, `brew install --cask LuisPeixoto/proxyzip/proxyzip`,
 `brew install LuisPeixoto/proxyzip/proxyzip-cli`, `scoop bucket add proxyzip https://github.com/LuisPeixoto/scoop-proxyzip`
 followed by `scoop install proxyzip`, or `winget install ProxyZip.ProxyZip`.
 
 > The Flatpak manifest repackages the release's `.deb` and has not been built with `flatpak-builder` yet. Test it
 > before submitting. The templates are checked in CI (`packaging/test_render.py`), but each channel's own linter
 > (`brew audit`, `winget validate`, …) is not run automatically.
+
+### Publishing the tap and the bucket automatically
+
+The **Publish packages** workflow runs when a release is **published** (not while it is a draft). It downloads
+`package-manifests.zip` from the release and commits the manifests to the tap and the bucket. It needs one secret in this
+repository, `PACKAGING_TOKEN`: a fine-grained personal access token whose only permission is *Contents: read and write* on
+`LuisPeixoto/homebrew-proxyzip` and `LuisPeixoto/scoop-proxyzip`. Without the secret the workflow does nothing, and you can
+copy the files by hand. Run it again for any tag from the **Actions** tab.
+
+The files in the tap and bucket point at release assets, so they only work once the release they name is published.
+
+## Plugin catalog
+
+`plugins/catalog.json` is what **Settings → Plugins → Browse** reads, straight from the `main` branch. It is generated
+(`python3 plugins/build_catalog.py`) and checked by a test, so a changed plugin without a refreshed catalog fails CI.
 
 ## Checklist
 
