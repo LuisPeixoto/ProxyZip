@@ -37,6 +37,11 @@ proxyzip start --exclude '*.apple.com' --filter '*api*' --verbose
 | `--upstream-proxy <URL>` | Chain through another proxy: `http://[user:pass@]host:port` or `socks5://[user:pass@]host:port`. |
 | `--reverse <PORT=URL>` | Expose a server on a local port, e.g. `8081=https://api.example.com`. Repeatable. |
 | `--throttle <PRESET>` | Simulate a slow network: `edge`, `3g`, `4g` or `wifi-poor`. |
+| `--http3` | Use [HTTP/3](http3.md) towards servers that advertise it (experimental). |
+| `--keep-alt-svc` | Do not hide HTTP/3 offers from clients. |
+| `--reverse-h3` | Also accept HTTP/3 on the UDP port of every `--reverse` listener. |
+| `--mcp <PORT>` | Serve [MCP](mcp.md) for AI assistants on `127.0.0.1:PORT`. |
+| `--mcp-allow-changes` | Let assistants edit rules and clear traffic (with `--mcp`). |
 | `-v, --verbose` | Print request and response headers. |
 | `-q, --quiet` | Do not print requests. |
 
@@ -88,6 +93,8 @@ proxyzip code session.pzsession --lang python --number 3
 | `proxyzip ca status` | Show whether the certificate is trusted. |
 | `proxyzip ca regenerate` | Replace the CA with a new one. |
 | `proxyzip ca ios-simulator` | Install into the booted iOS Simulator (macOS with Xcode). |
+| `proxyzip ca firefox` | Make Firefox trust ProxyZip in every profile. |
+| `proxyzip ca android` | List Android devices (`--list`), route one through ProxyZip (`--serial S --proxy PORT`, `--clear-proxy`) and install the CA (`--system` or `--user`). |
 
 ## `proxyzip system-proxy`
 
@@ -101,11 +108,33 @@ If ProxyZip ever exits abnormally while the system proxy is on, run `proxyzip sy
 
 ## `proxyzip env`
 
-Prints shell exports that route a terminal through ProxyZip and make common runtimes trust its CA.
+Prints shell exports that route a terminal through ProxyZip and make common runtimes trust its CA: curl, Node.js,
+Python, Ruby, Go, Git, pip, Cargo, the AWS CLI, Deno and Java. See [Devices](devices.md#terminal-and-runtimes).
 
 ```bash
 eval "$(proxyzip env)"
+proxyzip env --shell fish | source
+proxyzip env --shell powershell | Invoke-Expression
 ```
+
+| Option | Description |
+|--------|-------------|
+| `--shell <SHELL>` | `sh` (bash, zsh), `fish`, `powershell` or `cmd`. Detected by default. |
+| `--host <ADDR>`, `-p, --port <PORT>` | The proxy to point at (default `127.0.0.1:9393`). |
+
+## `proxyzip terminal`
+
+Opens a new terminal window whose traffic goes through ProxyZip.
+
+## `proxyzip mcp`
+
+Lets an AI assistant inspect traffic over MCP on stdio. See [AI assistants](mcp.md).
+
+| Option | Description |
+|--------|-------------|
+| *(none)* | Forward to a running ProxyZip (the desktop app, or `proxyzip start --mcp`). |
+| `--session <FILE>` | Serve a `.pzsession` or `.har` file instead, read-only. |
+| `--url <URL>`, `--token <TOKEN>` | Use a specific endpoint (`PROXYZIP_MCP_TOKEN` also works). |
 
 ## `proxyzip har-to-curl <FILE>`
 
