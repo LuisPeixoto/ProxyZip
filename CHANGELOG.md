@@ -6,6 +6,38 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0]
+
+Ecosystem.
+
+### Added
+
+- **Devices & apps**: guided setup for iPhone and iPad (configuration profile and QR code), the iOS Simulator, Android
+  emulators and devices (`adb` proxy routing, user and system certificates), Java (a trust store built from your JDK) and
+  Firefox (every profile), with a status check for each step.
+- **Terminal and runtimes**: `proxyzip env` now supports bash, zsh, fish, PowerShell and cmd, uses a CA bundle so hosts
+  you excluded keep working, covers Git, pip, Cargo, the AWS CLI, Deno and Java, and preloads a small agent that makes
+  Node.js older than 24 honour the proxy. `proxyzip terminal` and **Open a terminal** start a ready-made session.
+- **MCP server** for AI assistants (Claude Code, Cursor, VS Code, Claude Desktop): list, search and read requests, run
+  jq filters, generate code and, when allowed, edit rules. Loopback only, token protected, off by default.
+  `proxyzip mcp`, `proxyzip start --mcp`.
+- **Plugins**: traffic hooks, body viewers and “copy as” formats written in JavaScript, installed from a folder or a
+  `.zip`, with two examples.
+- **In-app updates**, signed with a separate update key, with a check at startup that can be turned off.
+- **HTTP/3**: `Alt-Svc` offers are hidden from clients so they keep using the proxy, servers that offer HTTP/3 can be
+  reached over QUIC (experimental), and reverse proxies can accept HTTP/3.
+- Release workflow: optional macOS and Windows signing, command-line archives for five targets, and Homebrew, Scoop,
+  winget and Flatpak manifests generated from the release.
+
+### Changed
+
+- The proxy-to-client body type is now boxed, so HTTP/1.1, HTTP/2 and HTTP/3 share one request path.
+- The default port of the MCP server is 9395 (the SOCKS5 listener keeps 9394).
+
+### Fixed
+
+- End-to-end tests no longer depend on the operating system's proxy settings.
+
 ## [0.3.0]
 
 Analysis.
