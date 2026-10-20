@@ -9,6 +9,7 @@ import {
   type FlowSummary,
   type RecentSession,
   type RuleSet,
+  type Suite,
   type Status,
 } from "../api";
 
@@ -29,6 +30,8 @@ export type ToolsTab =
   | "rewrite"
   | "breakpoints"
   | "scripts"
+  | "mocks"
+  | "suites"
   | "protobuf"
   | "throttle"
   | "dns"
@@ -176,6 +179,8 @@ class AppStore {
   composer = $state<ComposeInput | null>(null);
   /** The request whose code is being generated, or null. */
   codeFor = $state<FlowId | null>(null);
+  /** A suite built from captured requests, waiting in the Suites tool. */
+  suiteDraft = $state<Suite | null>(null);
   /** The two requests being compared, or null. */
   diff = $state<[FlowId, FlowId] | null>(null);
   recent = $state<RecentSession[]>([]);
