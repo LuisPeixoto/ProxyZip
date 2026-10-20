@@ -25,14 +25,15 @@ a Tauri desktop app) sit on top.
 | Crate | Responsibility |
 |-------|----------------|
 | `proxyzip-core` | The `Flow` model, a bounded in-memory `FlowStore`, and a broadcast event bus. |
-| `proxyzip-proxy` | Listener, `CONNECT` handling, TLS interception, HTTP/1.1, HTTP/2, WebSocket relay, upstream client. |
+| `proxyzip-proxy` | Listener, `CONNECT` handling, TLS interception, HTTP/1.1, HTTP/2, HTTP/3 (QUIC), WebSocket relay, upstream client. |
 | `proxyzip-tls` | Root CA creation and persistence, per-host leaf certificates with an LRU cache, TLS key logging. |
 | `proxyzip-rules` | The rule model (`rules.json`), request matching, and the pure functions that decide what happens to a request and rewrite it. No I/O. |
-| `proxyzip-script` | QuickJS runtime for user scripts: worker threads, time and memory limits, hashing helpers implemented in Rust. |
+| `proxyzip-script` | QuickJS runtime for user scripts and plugins: worker threads, time and memory limits, hashing helpers implemented in Rust, the plugin registry. |
+| `proxyzip-mcp` | Model Context Protocol server (JSON-RPC over stdio or authenticated loopback HTTP) that exposes captured traffic to AI assistants. |
 | `proxyzip-codec` | Content-encoding removal (gzip, deflate, Brotli, Zstandard), classification, pretty-printing, and structured viewers: Protobuf, gRPC, MessagePack, SSE, GraphQL, jq. |
 | `proxyzip-export` | HAR 1.2, `.pzsession` sessions, CSV, Postman collections and code generation in 14 languages. |
 | `proxyzip-sysproxy` | Enable, disable and read the operating-system proxy (networksetup, WinINet registry, gsettings and KDE). |
-| `proxyzip-certinstall` | Trust the CA in OS and application stores, iOS Simulator setup, terminal environment. |
+| `proxyzip-certinstall` | Trust the CA in OS and application stores; Firefox, Android and Java setup; the iOS profile; terminal environment for every shell. |
 | `proxyzip-cli` | The `proxyzip` binary. |
 | `apps/desktop/src-tauri` | Tauri 2 shell: owns the proxy, exposes commands, streams events to the UI. |
 | `apps/desktop/src` | Svelte 5 + TypeScript + Tailwind CSS interface. |
@@ -67,8 +68,12 @@ forward():
   → optional bandwidth pacing → on completion record body and timing; on client abort mark the flow as failed
   WebSocket: HTTP/1.1-only upstream client, both sides upgraded, frames relayed and recorded
 
+HTTP/3: Alt-Svc is learned from responses (and hidden from clients); servers that offered h3 are reached
+  over QUIC (quinn + h3), falling back to TCP when the connection fails
+
 extra listeners (started and stopped as the rules change):
   reverse proxy port ─▶ forward() with a fixed target
+  reverse proxy UDP port (HTTP/3) ─▶ the same forward(), with the request body collected first
   SOCKS5 port ───────▶ handshake ─▶ the same path as CONNECT
 ```
 
@@ -92,6 +97,14 @@ extra listeners (started and stopped as the rules change):
   snapshot. The connector reads DNS and upstream-proxy rules at connect time, so no client has to be rebuilt.
 - **Breakpoints are a rendezvous.** A paused flow waits on a one-shot channel held by the `BreakpointHub`. The UI
   resolves it with a decision. If the client disconnects while paused, the entry is dropped and the flow is marked failed.
+- **One request path for every protocol.** `forward()` is generic over the request body, so HTTP/1.1, HTTP/2 and
+  HTTP/3 requests share rules, scripts, breakpoints and recording. Upstream bodies are boxed into one type so a
+  hyper response and a QUIC stream are interchangeable.
+- **Plugins are scripts with more entry points.** They reuse the QuickJS sandbox and its limits; the host only adds
+  `decode` and `generate` calls and merges hook plugins into the rule set at apply time (never into `rules.json`).
+- **MCP is a thin layer.** The server implements JSON-RPC directly and reuses the filter, codec, export and rules
+  crates. The desktop app and `proxyzip start` supply the rule backend, so edits made by an assistant are applied
+  exactly like edits made in the Tools window.
 - **Private by default.** The proxy listens on loopback unless you enable LAN connections. The CA key is stored with
   owner-only permissions.
 
