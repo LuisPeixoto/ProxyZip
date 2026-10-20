@@ -58,6 +58,8 @@ export function isError(f: FlowSummary): boolean {
   return f.state === "failed" || (f.status ?? 0) >= 400;
 }
 
+export type SetupTab = "computer" | "terminal" | "ios" | "android" | "java" | "firefox";
+
 export function clientName(f: FlowSummary): string {
   const a = f.client_addr;
   if (a === "imported") return "Imported";
@@ -161,6 +163,12 @@ class AppStore {
   detailSize = $state(360);
   sidebarOpen = $state(true);
   settingsOpen = $state(false);
+  /** A newer version found on GitHub. */
+  update = $state<{ version: string; notes: string } | null>(null);
+  /** Download progress in percent while installing; null when the size is unknown; undefined when idle. */
+  updateProgress = $state<number | null | undefined>(undefined);
+  /** The Devices & apps setup window. */
+  setupOpen = $state<SetupTab | null>(null);
   rules = $state<RuleSet>(emptyRules());
   toolsOpen = $state(false);
   toolsTab = $state<ToolsTab>("block");
