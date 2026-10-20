@@ -72,6 +72,71 @@ enum Command {
     Export(ExportArgs),
     /// Print the code that sends a captured request, in one of 14 languages.
     Code(CodeArgs),
+    /// Serve an OpenAPI specification (or a workspace's mock servers) as a mock API.
+    Mock(MockArgs),
+    /// Run a replay suite (`.pzsuite`, or a Postman collection) and report what passed. Exits with 1 on a failure.
+    Run(RunArgs),
+    /// Check captured traffic against an OpenAPI specification. Exits with 1 when something does not conform.
+    Validate(ValidateArgs),
+}
+
+#[derive(clap::Args)]
+struct RunArgs {
+    /// A `.pzsuite` file or a Postman v2.1 collection (`.json`).
+    suite: PathBuf,
+    /// Use the variables of this environment of the suite.
+    #[arg(short, long)]
+    env: Option<String>,
+    /// Set a variable: `--var name=value`. Repeatable.
+    #[arg(long = "var", value_name = "NAME=VALUE")]
+    vars: Vec<String>,
+    /// Send the requests through a running ProxyZip, for example `http://127.0.0.1:9393`, so they appear in its list.
+    #[arg(long, value_name = "URL")]
+    via_proxy: Option<String>,
+    /// Trust ProxyZip's certificate authority (needed with --via-proxy for HTTPS).
+    #[arg(long)]
+    trust_proxyzip_ca: bool,
+    /// Do not verify server certificates.
+    #[arg(long)]
+    insecure: bool,
+    /// Skip the remaining requests after the first failure.
+    #[arg(long)]
+    bail: bool,
+    /// Write a JUnit XML report here.
+    #[arg(long, value_name = "FILE")]
+    junit: Option<PathBuf>,
+    /// Print the report as JSON.
+    #[arg(long)]
+    json: bool,
+    /// Seconds to wait for each response.
+    #[arg(long, default_value_t = 30)]
+    timeout: u64,
+}
+
+#[derive(clap::Args)]
+struct MockArgs {
+    /// An OpenAPI 3 file (`.yaml`, `.yml` or `.json`) or a `.pzworkspace` with mock servers.
+    spec: PathBuf,
+    /// Port to serve on.
+    #[arg(short, long, default_value_t = 4010)]
+    port: u16,
+    /// Address to listen on.
+    #[arg(long, default_value = "127.0.0.1")]
+    host: String,
+    /// Wait this many milliseconds before every answer.
+    #[arg(long, default_value_t = 0)]
+    delay: u64,
+}
+
+#[derive(clap::Args)]
+struct ValidateArgs {
+    /// The OpenAPI 3 specification (YAML or JSON).
+    spec: PathBuf,
+    /// A `.har` or `.pzsession` file.
+    capture: PathBuf,
+    /// Print the report as JSON.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(clap::Args)]
@@ -84,6 +149,9 @@ struct ExportArgs {
     /// Write to this file instead of standard output (required for `session`).
     #[arg(short, long)]
     output: Option<PathBuf>,
+    /// Replace secrets (tokens, cookies, passwords) before writing.
+    #[arg(long)]
+    redact: bool,
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -161,6 +229,12 @@ struct StartArgs {
     /// Also accept HTTP/3 (UDP) on the ports of every --reverse listener.
     #[arg(long)]
     reverse_h3: bool,
+    /// Add the rules of a `.pzworkspace` file (see `docs/workspaces.md`).
+    #[arg(long, value_name = "FILE")]
+    workspace: Option<PathBuf>,
+    /// Remove secrets from what `--har` and `--save` write.
+    #[arg(long)]
+    redact: bool,
     /// Use HTTP/3 towards servers that advertise it with Alt-Svc (experimental).
     #[arg(long)]
     http3: bool,
@@ -268,6 +342,9 @@ async fn main() -> Result<()> {
         }
         Command::Export(args) => export(args),
         Command::Code(args) => code(args),
+        Command::Mock(args) => mock(args).await,
+        Command::Run(args) => run_suite(home, args).await,
+        Command::Validate(args) => validate(args),
         Command::HarToCurl { file } => {
             let json = std::fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
             for flow in proxyzip_export::har::import(&json)? {
@@ -530,13 +607,16 @@ async fn start(home: PathBuf, args: StartArgs) -> Result<()> {
         Ok(h) => h.shutdown().await,
         Err(_) => tracing::debug!("proxy handle still shared at exit"),
     }
+    let finished = |flows: Vec<proxyzip_core::Flow>| {
+        if args.redact { proxyzip_export::redact::redacted(&flows, &Default::default()) } else { flows }
+    };
     if let Some(path) = args.har {
-        let flows = store.all();
+        let flows = finished(store.all());
         std::fs::write(&path, proxyzip_export::har::export_json(&flows)?)?;
         eprintln!("Wrote {} flows to {}", flows.len(), path.display());
     }
     if let Some(path) = args.save {
-        let flows = store.all();
+        let flows = finished(store.all());
         std::fs::write(&path, proxyzip_export::session::write(&flows)?)?;
         eprintln!("Saved {} flows to {}", flows.len(), path.display());
     }
@@ -555,7 +635,10 @@ fn load_flows(path: &std::path::Path) -> Result<Vec<proxyzip_core::Flow>> {
 }
 
 fn export(args: ExportArgs) -> Result<()> {
-    let flows = load_flows(&args.input)?;
+    let mut flows = load_flows(&args.input)?;
+    if args.redact {
+        flows = proxyzip_export::redact::redacted(&flows, &Default::default());
+    }
     let text = match args.format {
         ExportFormat::Csv => proxyzip_export::csv::export(&flows),
         ExportFormat::Har => proxyzip_export::har::export_json(&flows)?,
@@ -576,6 +659,121 @@ fn export(args: ExportArgs) -> Result<()> {
             eprintln!("Wrote {} flows to {}", flows.len(), path.display());
         }
         None => print!("{text}"),
+    }
+    Ok(())
+}
+
+async fn mock(args: MockArgs) -> Result<()> {
+    use proxyzip_rules::MockServer;
+    let text = std::fs::read_to_string(&args.spec).with_context(|| format!("reading {}", args.spec.display()))?;
+    let is_workspace = args.spec.extension().is_some_and(|e| e.eq_ignore_ascii_case("pzworkspace"));
+    let mut servers: Vec<MockServer> = if is_workspace {
+        proxyzip_export::workspace::read(&text)?.rules.mocks
+    } else {
+        let spec = proxyzip_openapi::Spec::parse(&text)?;
+        vec![spec.to_mock_server(&spec.title(), "", Some(args.port))]
+    };
+    anyhow::ensure!(!servers.is_empty(), "{} has no mock servers", args.spec.display());
+    for s in servers.iter_mut() {
+        s.listen_port = s.listen_port.or(Some(args.port));
+        for r in s.routes.iter_mut() {
+            r.delay_ms = r.delay_ms.max(args.delay);
+        }
+    }
+    let ca = Arc::new(CertificateAuthority::generate()?);
+    let store = FlowStore::default();
+    let listen: SocketAddr = format!("{}:0", args.host).parse().context("invalid --host")?;
+    let rules = RuleSet { mocks: servers.clone(), ..Default::default() };
+    let settings = ProxySettings { rules: Arc::new(rules), ..Default::default() };
+    let handle = ProxyServer::start(ProxyConfig { listen, ..Default::default() }, settings, ca, store.clone()).await?;
+    if let Some(error) = handle.listener_errors.first() {
+        anyhow::bail!("{error}");
+    }
+    for s in &servers {
+        let port = s.listen_port.unwrap_or(args.port);
+        eprintln!("⚡ Mock \"{}\" on http://{}:{port}", s.name, args.host);
+        for r in s.routes.iter().filter(|r| r.enabled) {
+            eprintln!("   {:<7} {}  → {}", if r.method.is_empty() { "ANY" } else { &r.method }, r.path, r.status);
+        }
+    }
+    eprintln!("Press Ctrl+C to stop.\n");
+    let mut rx = store.subscribe();
+    tokio::spawn(async move {
+        while let Ok(event) = rx.recv().await {
+            if let FlowEvent::Updated { flow } = event
+                && is_final(&flow)
+            {
+                println!("{}", line(&flow, false));
+            }
+        }
+    });
+    tokio::signal::ctrl_c().await?;
+    handle.shutdown().await;
+    Ok(())
+}
+
+async fn run_suite(home: PathBuf, args: RunArgs) -> Result<()> {
+    use std::collections::BTreeMap;
+    let text = std::fs::read_to_string(&args.suite).with_context(|| format!("reading {}", args.suite.display()))?;
+    let is_postman = text.contains("\"info\"") && text.contains("\"item\"") && !text.contains("proxyzip-suite");
+    let suite =
+        if is_postman { proxyzip_suite::import_postman(&text)? } else { proxyzip_suite::Suite::from_json(&text)? };
+    let mut variables = BTreeMap::new();
+    for spec in &args.vars {
+        let (k, v) = spec.split_once('=').with_context(|| format!("--var expects NAME=VALUE, got {spec:?}"))?;
+        variables.insert(k.trim().to_string(), v.to_string());
+    }
+    let extra_root_pem = if args.trust_proxyzip_ca {
+        Some(CertificateAuthority::load_or_create(&home)?.cert_pem().to_string())
+    } else {
+        None
+    };
+    let options = proxyzip_suite::RunOptions {
+        environment: args.env.clone(),
+        variables,
+        proxy: args.via_proxy.clone(),
+        extra_root_pem,
+        insecure: args.insecure,
+        timeout: std::time::Duration::from_secs(args.timeout),
+        bail: args.bail,
+        base_dir: args.suite.parent().map(PathBuf::from).unwrap_or_default(),
+    };
+    let report = proxyzip_suite::run(&suite, &options).await;
+    if let Some(path) = &args.junit {
+        std::fs::write(path, proxyzip_suite::to_junit(&report))?;
+    }
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        print!("{}", report.to_text());
+    }
+    if !report.ok() {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+fn validate(args: ValidateArgs) -> Result<()> {
+    let text = std::fs::read_to_string(&args.spec).with_context(|| format!("reading {}", args.spec.display()))?;
+    let spec = proxyzip_openapi::Spec::parse(&text)?;
+    let flows = load_flows(&args.capture)?;
+    let report = proxyzip_openapi::validate_flows(&spec, &flows);
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("{}: {} request(s) checked, {} skipped", spec.title(), report.checked, report.skipped);
+        for v in &report.violations {
+            println!("✗ #{} {} {}", v.flow_id, v.method, v.url);
+            println!("    {}{}", v.message, v.pointer.as_ref().map(|p| format!(" (at {p})")).unwrap_or_default());
+        }
+        if report.violations.is_empty() {
+            println!("✓ everything conforms");
+        } else {
+            println!("{} problem(s) in {} request(s)", report.violations.len(), report.flows_with_violations().len());
+        }
+    }
+    if !report.violations.is_empty() {
+        std::process::exit(1);
     }
     Ok(())
 }
@@ -604,6 +802,11 @@ fn build_rules(args: &StartArgs) -> Result<RuleSet> {
         }
         None => RuleSet::default(),
     };
+    if let Some(path) = &args.workspace {
+        let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        let workspace = proxyzip_export::workspace::read(&text)?;
+        proxyzip_export::workspace::merge_rules(&mut rules, workspace.rules);
+    }
     if let Some(port) = args.socks_port {
         rules.socks = SocksListener { enabled: true, port };
     }
@@ -761,17 +964,35 @@ mod tests {
     fn export_converts_sessions() {
         let (dir, session) = sample_session();
         let csv = dir.join("out.csv");
-        export(ExportArgs { input: session.clone(), format: ExportFormat::Csv, output: Some(csv.clone()) }).unwrap();
+        export(ExportArgs {
+            input: session.clone(),
+            format: ExportFormat::Csv,
+            output: Some(csv.clone()),
+            redact: false,
+        })
+        .unwrap();
         assert!(std::fs::read_to_string(&csv).unwrap().contains("https://api.example.com/v1/items"));
         let postman = dir.join("out.json");
-        export(ExportArgs { input: session.clone(), format: ExportFormat::Postman, output: Some(postman.clone()) })
-            .unwrap();
+        export(ExportArgs {
+            input: session.clone(),
+            format: ExportFormat::Postman,
+            output: Some(postman.clone()),
+            redact: false,
+        })
+        .unwrap();
         assert!(std::fs::read_to_string(&postman).unwrap().contains("collection/v2.1.0"));
         let har = dir.join("out.har");
-        export(ExportArgs { input: session.clone(), format: ExportFormat::Har, output: Some(har.clone()) }).unwrap();
+        export(ExportArgs {
+            input: session.clone(),
+            format: ExportFormat::Har,
+            output: Some(har.clone()),
+            redact: false,
+        })
+        .unwrap();
         // The HAR we wrote can be loaded again.
         assert_eq!(load_flows(&har).unwrap().len(), 1);
-        let err = export(ExportArgs { input: session, format: ExportFormat::Session, output: None }).unwrap_err();
+        let err = export(ExportArgs { input: session, format: ExportFormat::Session, output: None, redact: false })
+            .unwrap_err();
         assert!(err.to_string().contains("--output"));
         let _ = std::fs::remove_dir_all(dir);
     }
