@@ -5,4 +5,6 @@ pub mod csv;
 pub mod curl;
 pub mod har;
 pub mod postman;
+pub mod redact;
 pub mod session;
+pub mod workspace;
