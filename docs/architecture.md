@@ -29,6 +29,8 @@ a Tauri desktop app) sit on top.
 | `proxyzip-tls` | Root CA creation and persistence, per-host leaf certificates with an LRU cache, TLS key logging. |
 | `proxyzip-rules` | The rule model (`rules.json`), request matching, and the pure functions that decide what happens to a request and rewrite it. No I/O. |
 | `proxyzip-script` | QuickJS runtime for user scripts and plugins: worker threads, time and memory limits, hashing helpers implemented in Rust, the plugin registry. |
+| `proxyzip-openapi` | OpenAPI 3 loading, example generation, mock-server generation and traffic-against-specification validation. |
+| `proxyzip-suite` | Replay suites: model, runner, assertions, JUnit reports and Postman import. |
 | `proxyzip-mcp` | Model Context Protocol server (JSON-RPC over stdio or authenticated loopback HTTP) that exposes captured traffic to AI assistants. |
 | `proxyzip-codec` | Content-encoding removal (gzip, deflate, Brotli, Zstandard), classification, pretty-printing, and structured viewers: Protobuf, gRPC, MessagePack, SSE, GraphQL, jq. |
 | `proxyzip-export` | HAR 1.2, `.pzsession` sessions, CSV, Postman collections and code generation in 14 languages. |
@@ -105,6 +107,11 @@ extra listeners (started and stopped as the rules change):
 - **MCP is a thin layer.** The server implements JSON-RPC directly and reuses the filter, codec, export and rules
   crates. The desktop app and `proxyzip start` supply the rule backend, so edits made by an assistant are applied
   exactly like edits made in the Tools window.
+- **Mocks are rules.** A mock server is part of `RuleSet`; the engine matches host and route and returns an action,
+  and the proxy renders the template (`proxyzip_core::template`, shared with suites) and answers. A mock with its own
+  port is another extra listener, like a reverse proxy.
+- **Specifications are data.** `proxyzip-openapi` turns a spec into the same `MockServer` the user could have typed,
+  and checks flows with the JSON Schema crate after expanding `$ref`s and translating 3.0 keywords.
 - **Private by default.** The proxy listens on loopback unless you enable LAN connections. The CA key is stored with
   owner-only permissions.
 
