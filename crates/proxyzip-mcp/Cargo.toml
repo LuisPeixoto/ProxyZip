@@ -1,0 +1,27 @@
+[package]
+name = "proxyzip-mcp"
+description = "Model Context Protocol server that lets AI assistants inspect ProxyZip traffic"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+bytes.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+proxyzip-codec.workspace = true
+proxyzip-core.workspace = true
+proxyzip-export.workspace = true
+proxyzip-rules.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
