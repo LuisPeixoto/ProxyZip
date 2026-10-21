@@ -25,7 +25,9 @@ ProxyZip is an HTTP and HTTPS debugging proxy with a desktop app and a command l
 
 The example below uses a fictional shop API at `api.shopwave.dev`.
 
-![ProxyZip showing the JSON response of GET /v1/products/sku_1042 next to the request list](https://luispeixoto.github.io/ProxyZip/images/hero-1200.webp)
+![The ProxyZip request list: ten requests to api.shopwave.dev with status, method, path and a mock tag](https://luispeixoto.github.io/ProxyZip/images/devto-requests.png)
+
+![The JSON response of GET /v1/products/sku_1042 shown as a tree in ProxyZip](https://luispeixoto.github.io/ProxyZip/images/devto-json.png)
 
 ## Install it
 
@@ -60,13 +62,13 @@ In the app you get the same requests as a list, with headers, cookies, timing, T
 
 Binary protocols are covered too. gRPC, gRPC-Web and plain Protobuf messages are decoded even without the `.proto` files, which makes gRPC debugging a lot less painful.
 
-![A gRPC-Web response decoded into numbered Protobuf fields](https://luispeixoto.github.io/ProxyZip/images/grpc-1200.webp)
+![A gRPC-Web response decoded into numbered Protobuf fields](https://luispeixoto.github.io/ProxyZip/images/devto-grpc.png)
 
 ## Change traffic instead of only reading it
 
 Right-click a request to set a **breakpoint**: the next matching request stops before it leaves, and you can edit the method, URL, headers or body. **Map Local** answers with a file from your disk, **Map Remote** sends the request to another host, and rewrite rules change headers, bodies and status codes. You can also throttle to a slow network or block a host to see how your app copes.
 
-![Context menu with Set breakpoint, Map Local, Map Remote and Block](https://luispeixoto.github.io/ProxyZip/images/menu-1200.webp)
+![Context menu with Set breakpoint, Map Local, Map Remote and Block](https://luispeixoto.github.io/ProxyZip/images/devto-menu.png)
 
 ## Mock an API that does not exist yet
 
@@ -79,7 +81,7 @@ proxyzip validate petstore.yaml capture.pzsession
 
 `proxyzip validate` checks captured traffic against the specification and exits with `1` if anything does not conform, so it works as a CI step.
 
-![The Mocks window with routes for products, cart and checkout](https://luispeixoto.github.io/ProxyZip/images/mocks-1200.webp)
+![The Mocks window with routes for products, cart and checkout](https://luispeixoto.github.io/ProxyZip/images/devto-mocks.png)
 
 ## Turn requests into API tests
 
@@ -91,7 +93,7 @@ proxyzip run checkout.pzsuite --env staging --junit report.xml
 
 The command exits with `1` when a request fails and writes a JUnit report that CI systems can display. Postman collections run the same way.
 
-![A suite run showing ten requests passed](https://luispeixoto.github.io/ProxyZip/images/suites-1200.webp)
+![A suite run showing ten requests passed](https://luispeixoto.github.io/ProxyZip/images/devto-suites.png)
 
 ## Phones, emulators and AI assistants
 
